@@ -2,8 +2,13 @@ import socket
 import ssl
 import os
 import sys
+import time
+import gzip
 
 sockets = {}
+
+# Cache is in the form {"label": ["expiryTime", "content"]}
+browserCache = {}
 
 class URL:
     def __init__(self, URL):
@@ -33,6 +38,17 @@ class URL:
         if(attempt > 5):
             print("Too many redirects...")
             return 0
+        
+        # Check if response already cached
+        ans = browserCache.get(self.host + self.path)
+        if ans: 
+            expiryTime = ans[0]
+            if time.time() < expiryTime:
+                return ans[1]
+            else:
+                # Delete stale cache
+                del browserCache[self.host + self.path]
+
         key = self.host + ":" + str(self.port)
         s = sockets.get(key)
         if not s:
@@ -46,9 +62,11 @@ class URL:
                 s = ctx.wrap_socket(s, server_hostname=self.host)  
             sockets[key] = s      
 
-        request = f"GET {self.path} HTTP/1.0\r\n"
+
+        request = f"GET {self.path} HTTP/1.1\r\n"
         request += f"Host: {self.host}\r\nConnection: keep-alive\r\n"
         request += f"User-Agent: Jef\r\n"
+        request += "Accept-Encoding: gzip\r\n"
         # Adding headers
         request = self.addHeaders(request, headers)
         request += "\r\n"
@@ -56,6 +74,7 @@ class URL:
         s.send(request.encode("utf8"))
         
         response = s.makefile('rb', newline = "\r\n")
+        arrTime = time.time()
         statusline = response.readline().decode("utf8")
         version, status, explanation = statusline.split(" ", 2)
 
@@ -65,16 +84,12 @@ class URL:
             if line == "\r\n": break
             header, value = line.split(":", 1)
             response_headers[header.casefold()] = value.strip()
-        assert "transfer-encoding" not in response_headers
-        assert "content-encoding" not in response_headers
 
         statusCode = int(status)
+        # Redirect Handling
         if statusCode >= 300 and statusCode < 400 and attempt < 5:
             path = response_headers["location"]
-            # redirect until success
-            # Destination can be absolute or relative
             if path.startswith("http://") or path.startswith("https://"):
-                # send it over
                 nextHop = response_headers["location"]
                 return URL(nextHop).request({}, attempt + 1)  # pass attempt count down
             else:
@@ -82,14 +97,58 @@ class URL:
                 self.path = path
                 return self.request({}, attempt + 1)
 
-        content = ""
-        msgLen = response_headers.get("content-length")
-        if not msgLen:
-            content = response.read().decode("utf8")
+        #Encoding Handling
+        raw = b""
+        if response_headers.get("transfer-encoding") == "chunked":
+            while True:
+                size_line = response.readline().decode("utf8").strip()
+                size = int(size_line, 16)
+                if size == 0: break
+                raw += response.read(size)
+                response.readline()
         else:
-            content = response.read(int(msgLen)).decode("utf8")
-        # s.close()
+            msgLen = response_headers.get("content-length")
+            if not msgLen:
+                raw = response.read()
+            else:
+                raw = response.read(int(msgLen))
+
+        if isGzip(response_headers):
+            raw = gzip.decompress(raw)
+
+        content = raw.decode("utf8")  # works for all four cases
+        if statusCode in [200, 301, 404]: self.cache(response_headers, content, arrTime)
         return content
+    
+    def cache(self, headers, content, time):
+
+        cache_control = headers.get("cache-control")
+        if not cache_control: return
+        directives = [d.strip() for d in cache_control.split(",")]
+        accepted = ["max-age", "no-store"]
+
+        for directive in directives:
+            success = 0
+            for entry in accepted:
+                if directive.startswith(entry): success = 1
+            if success == 0: return
+
+        # All un-cacheable responses have been sent away
+        for directive in directives:
+            if(directive.startswith("no-store")): return
+            if directive.startswith("max-age"):
+                # Store the header
+                attr, val = directive.split("=", 1)
+                age = headers.get("age")
+                if not age: age = 0
+                expiryTime = time + (int(val) - int(age))
+                browserCache[self.host + self.path] = [expiryTime, content]
+                return
+
+
+def isGzip(headers):
+    if headers.get("content-encoding") == "gzip": return True
+    else: return False
 
 def show(body):
     in_tag = False
