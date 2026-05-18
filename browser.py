@@ -4,11 +4,17 @@ import os
 import sys
 import time
 import gzip
-
+import tkinter
+import emoji
+from tkinter import ttk
+from PIL import Image, ImageTk
 sockets = {}
 
 # Cache is in the form {"label": ["expiryTime", "content"]}
 browserCache = {}
+HSTEP = 13
+VSTEP = 18
+SCROLL_STEP = 100
 
 class URL:
     def __init__(self, URL):
@@ -150,21 +156,39 @@ def isGzip(headers):
     if headers.get("content-encoding") == "gzip": return True
     else: return False
 
-def show(body):
-    in_tag = False
-    body = body.replace("&lt;", "<")
-    body = body.replace("&gt;", ">")
+# def show(body):
+#     in_tag = False
+#     body = body.replace("&lt;", "<")
+#     body = body.replace("&gt;", ">")
+#     for c in body:
+#         if c == "<":
+#             in_tag = True
+#         elif c == ">":
+#             in_tag = False
+#         elif not in_tag:
+#             print(c, end="")
+
+def lex(body):
+    text = ""
+    in_tag = True
+    tag = ""
     for c in body:
         if c == "<":
             in_tag = True
+            tag = ""
         elif c == ">":
             in_tag = False
+            if tag.strip() in ["br", "br/", "/p"]:
+                text += "\n"
+                if tag.strip == "/p": print("The text:", text[-1] + text[-2])
+        elif in_tag:
+            tag += c
         elif not in_tag:
-            print(c, end="")
-
-def load(url, headers):
-    body = url.request(headers, 0)
-    show(body)
+            text += c
+    return text
+# def load(url, headers):
+#     body = url.request(headers, 0)
+#     show(body)
 
 def viewLoad(url, headers):
     body = url.request(headers, 0)
@@ -248,30 +272,156 @@ def isViewSource(arg):
     if "view-source:" not in arg: return False
     else: return True
 
+WIDTH, HEIGHT = 800, 600
+class Browser:
+    def __init__(self):
+        self.window = tkinter.Tk()
+        self.canvas = tkinter.Canvas(
+            self.window, 
+            width=WIDTH,
+            height=HEIGHT,
+            bg = "#f9f3de"
+        )
+        # self.canvas.pack(fill="both", expand=1)
+        self.scroll = 0
+        # self.scrollbar = ttk.Scrollbar(self.window, orient= "vertical")
+        self.scrollbar = tkinter.Scrollbar(self.window, orient= "vertical", command = self.scrollMaster, bg = "black")
+        self.scrollbar.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=1)
+        self.emojis = []
+        # self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.window.bind("<Down>", self.scrolldown)
+        self.window.bind("<Up>", self.scrollup)
+        self.window.bind("<Button-4>", self.scrollup)
+        self.window.bind("<Button-5>", self.scrolldown)
+        self.window.bind("<Configure>", self.resize)    
+        self.window.bind("<End>", self.scrollEnd)
+        self.window.bind("<Home>", self.scrollTop)
+
+    def scrollEnd(self, e):
+        self.scroll = self.display_list[-1][1] - HEIGHT + VSTEP
+        self.canvas.delete("all")
+        self.draw()
+
+    def scrollTop(self, e):
+        self.scroll = 0
+        self.canvas.delete("all")
+        self.draw()
+
+    def scrollMaster(self, action, *args):
+        if action == "scroll":
+            direction = int(args[0])  # 1 = down, -1 = up
+            if direction > 0:
+                self.scrolldown(None)
+            else:
+                self.scrollup(None)
+        elif action == "moveto":
+            # print("hi")
+            fraction = float(args[0])  # 0.0 to 1.0 position
+            print("fraction: ", fraction)
+            if(fraction < 0):
+                print(fraction,"Too high")
+                return
+            if fraction > (1 + (VSTEP/self.display_list[-1][1])*2):
+                maxScroll = self.display_list[-1][1] - HEIGHT
+                self.scroll = min(int(fraction * maxScroll), 1 + (VSTEP/self.display_list[-1][1])*5)
+                print(fraction, "too low")
+                return
+            maxScroll = self.display_list[-1][1] - HEIGHT
+            self.scroll = int(fraction * maxScroll)
+            self.canvas.delete("all")
+            self.draw()
+
+    def resize(self, e):
+        global WIDTH, HEIGHT
+        WIDTH = e.width
+        HEIGHT = e.height
+        self.display_list = layout(self.text)
+        self.canvas.delete("all")
+        self.draw()
+
+    def load(self, url, headers):
+        body = url.request(headers, 0)
+        text = lex(body)
+        self.text = text
+        self.display_list = layout(text)
+        self.draw()
+
+    def draw(self):
+        self.emojis = []
+        pgLen = self.display_list[-1][1]
+        scrollUnit = (SCROLL_STEP / pgLen) 
+        thumbLen = (HEIGHT/pgLen)
+        num = scrollUnit * (self.scroll/100)
+        self.scrollbar.set(num, num + thumbLen)
+        # print(f"{num} and {num + thumbLen}")
+        for x, y, c in self.display_list:
+            if y > self.scroll + HEIGHT: continue
+            if y + VSTEP < self.scroll: continue
+            if emoji.is_emoji(c):
+                fileName = "./assets/emojis/" + hex(ord(c))[2:].upper() + ".png"
+                print(fileName)
+                img = Image.open(fileName)
+                img = img.resize((16, 16))
+                photo = ImageTk.PhotoImage(img)
+                self.emojis.append(photo)
+                self.canvas.create_image(x, y - self.scroll, image= photo)
+                continue
+            self.canvas.create_text(x, y - self.scroll, text=c)
+
+    def scrolldown(self, e):
+        maxScroll = self.display_list[-1][1] - HEIGHT + VSTEP
+        if self.scroll < maxScroll:
+            self.scroll = min(self.scroll + SCROLL_STEP, maxScroll)
+        self.canvas.delete("all")
+        self.draw()
+
+    def scrollup(self, e):
+        self.canvas.delete("all")
+        if self.scroll >= 1: self.scroll -= SCROLL_STEP
+        self.draw()
+
+def layout(text):
+    display_list = []
+    cursor_x, cursor_y = HSTEP, VSTEP
+    for c in text:
+        if c == "\n":
+                cursor_y += VSTEP
+                cursor_x = HSTEP
+                continue
+        display_list.append((cursor_x, cursor_y, c))
+        cursor_x += HSTEP
+        if cursor_x >= WIDTH - HSTEP:
+            cursor_y += VSTEP
+            cursor_x = HSTEP
+    return display_list
+
 if __name__ == "__main__":
     import sys
     import os
-    if(len(sys.argv) < 2):
-        loadFile("")
-    else:
-        link = sys.argv[1]
-        if isURL(link):
-            print("Link detected")
-            url = URL(sys.argv[1])
-            headers = loadHeaders(sys.argv)
-            load(url, headers)
+    Browser().load(URL(sys.argv[1]), {})
+    tkinter.mainloop()
+    # if(len(sys.argv) < 2):
+    #     loadFile("")
+    # else:
+    #     link = sys.argv[1]
+    #     if isURL(link):
+    #         print("Link detected")
+    #         url = URL(sys.argv[1])
+    #         headers = loadHeaders(sys.argv)
+    #         load(url, headers)
 
-        elif isDataURI(link):
-            print("Data URI detected")
-            scheme, link = link.split(":", 1)
-            fileType, content = link.split(",", 1)
-            if(fileType == "text/html"):
-                print(content)
-        elif isViewSource(link):
-            scheme, viewUrl = link.split(":", 1)
-            url = URL(viewUrl)
-            headers = loadHeaders(sys.argv)
-            viewLoad(url, headers)
-        else:
-            print("File detected")
-            loadFile(link)
+    #     elif isDataURI(link):
+    #         print("Data URI detected")
+    #         scheme, link = link.split(":", 1)
+    #         fileType, content = link.split(",", 1)
+    #         if(fileType == "text/html"):
+    #             print(content)
+    #     elif isViewSource(link):
+    #         scheme, viewUrl = link.split(":", 1)
+    #         url = URL(viewUrl)
+    #         headers = loadHeaders(sys.argv)
+    #         viewLoad(url, headers)
+    #     else:
+    #         print("File detected")
+    #         loadFile(link)
