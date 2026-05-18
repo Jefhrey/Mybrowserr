@@ -39,7 +39,7 @@ class URL:
             req += f"{name}: {value}\r\n"
         return req
     
-    def request(self, headers, attempt):
+    def request(self, headers, attempt, browser):
 
         if(attempt > 5):
             print("Too many redirects...")
@@ -62,7 +62,21 @@ class URL:
                 family = socket.AF_INET,
                 type = socket.SOCK_STREAM,
                 proto = socket.IPPROTO_TCP)
-            s.connect((self.host, self.port))
+            try:
+                s.connect((self.host, self.port))
+            except socket.timeout:
+                browser.dataLoad("Connection timed out")
+                return 
+            except ConnectionRefusedError:
+                browser.dataLoad("Connection refused")
+                return
+            except socket.gaierror:
+                browser.aboutBlank()
+                return
+            except OSError as e:
+                browser.dataLoad(f"Socket error: {e}")
+                return
+
             if self.scheme == "https":
                 ctx = ssl.create_default_context()
                 s = ctx.wrap_socket(s, server_hostname=self.host)  
@@ -156,22 +170,11 @@ def isGzip(headers):
     if headers.get("content-encoding") == "gzip": return True
     else: return False
 
-# def show(body):
-#     in_tag = False
-#     body = body.replace("&lt;", "<")
-#     body = body.replace("&gt;", ">")
-#     for c in body:
-#         if c == "<":
-#             in_tag = True
-#         elif c == ">":
-#             in_tag = False
-#         elif not in_tag:
-#             print(c, end="")
-
 def lex(body):
     text = ""
     in_tag = True
     tag = ""
+    if not body: return
     for c in body:
         if c == "<":
             in_tag = True
@@ -186,13 +189,6 @@ def lex(body):
         elif not in_tag:
             text += c
     return text
-# def load(url, headers):
-#     body = url.request(headers, 0)
-#     show(body)
-
-def viewLoad(url, headers):
-    body = url.request(headers, 0)
-    print(body)
 
 def loadHeaders(args):
 
@@ -218,45 +214,6 @@ def isURL(arg):
         return False
     scheme, arg = arg.split("://", 1)
     return scheme in ["http", "https"]
-
-def loadFile(url):
-    path = ""
-    scheme = ""
-
-    if(len(sys.argv) < 2):
-        # open default
-        f = open("default.txt", "r")
-        txt = f.read()
-        print(txt)
-        f.close()
-    elif "://" not in url:
-        path = sys.argv[1]
-        try:
-            # try relative path
-            root = os.getcwd()
-            root = os.path.join(root, path)
-            print(f"Root: {root} \tPath: {path}")
-            f = open(root, "r")
-            txt = f.read()
-            print(txt)
-            f.close()
-        except FileNotFoundError:
-            print("File not found...")
-    else:
-        scheme, path = url.split("://", 1)
-        if scheme != "file":
-            f = open("error.txt", "r")
-            txt = f.read()
-            print(txt)
-            f.close()
-            return
-        try:
-            f = open(path, "r")
-            txt = f.read()
-            print(txt)
-            f.close()
-        except FileNotFoundError:
-            print("File does not exist...")
                 
 def isDataURI(arg):
     return arg.startswith("data:")
@@ -340,27 +297,42 @@ class Browser:
         self.canvas.delete("all")
         self.draw()
 
-    def load(self, url, headers):
-        body = url.request(headers, 0)
+    def load(self, url, headers, browser):
+        body = url.request(headers, 0, browser)
         text = lex(body)
+        self.text = text
+        self.display_list = altLayout(text)
+        self.draw()
+
+    def srcLoad(self, url, headers):
+        text = url.request(headers, 0)
+        # text = lex(body)
+        self.text = text
+        self.display_list = layout(text)
+        self.draw()
+
+    def dataLoad(self, text):
         self.text = text
         self.display_list = layout(text)
         self.draw()
 
     def draw(self):
         self.emojis = []
-        pgLen = self.display_list[-1][1]
+        pgLen = 1
+        if len(self.display_list) > 0 : pgLen = self.display_list[-1][1]
         scrollUnit = (SCROLL_STEP / pgLen) 
         thumbLen = (HEIGHT/pgLen)
         num = scrollUnit * (self.scroll/100)
         self.scrollbar.set(num, num + thumbLen)
+        if num + thumbLen >= 1 and num == 0:
+            self.scrollbar.pack_forget()
         # print(f"{num} and {num + thumbLen}")
+        if len(self.display_list) == 0: return
         for x, y, c in self.display_list:
             if y > self.scroll + HEIGHT: continue
             if y + VSTEP < self.scroll: continue
             if emoji.is_emoji(c):
                 fileName = "./assets/emojis/" + hex(ord(c))[2:].upper() + ".png"
-                print(fileName)
                 img = Image.open(fileName)
                 img = img.resize((16, 16))
                 photo = ImageTk.PhotoImage(img)
@@ -380,10 +352,13 @@ class Browser:
         self.canvas.delete("all")
         if self.scroll >= 1: self.scroll -= SCROLL_STEP
         self.draw()
-
+    
+    def aboutBlank(self):
+        self.dataLoad("")
 def layout(text):
     display_list = []
     cursor_x, cursor_y = HSTEP, VSTEP
+    if not text: return display_list
     for c in text:
         if c == "\n":
                 cursor_y += VSTEP
@@ -396,32 +371,84 @@ def layout(text):
             cursor_x = HSTEP
     return display_list
 
+def altLayout(text):
+    display_list = []
+    cursor_x, cursor_y = WIDTH - HSTEP, VSTEP
+    print("hello from alt")
+    if not text: return display_list
+    for c in text:
+        if c == "\n":
+                cursor_y += VSTEP
+                cursor_x = WIDTH - HSTEP
+                continue
+        display_list.append((cursor_x, cursor_y, c))
+        cursor_x -= HSTEP
+        if cursor_x <= 0:
+            cursor_y += VSTEP
+            cursor_x = WIDTH - HSTEP
+    return display_list
+
+
+
+
 if __name__ == "__main__":
     import sys
     import os
-    Browser().load(URL(sys.argv[1]), {})
-    tkinter.mainloop()
-    # if(len(sys.argv) < 2):
-    #     loadFile("")
-    # else:
-    #     link = sys.argv[1]
-    #     if isURL(link):
-    #         print("Link detected")
-    #         url = URL(sys.argv[1])
-    #         headers = loadHeaders(sys.argv)
-    #         load(url, headers)
+    if len(sys.argv) < 2:
+        Browser().dataLoad("Welcome to homepage")
+    else:
+        link = sys.argv[1]
+        if isURL(link):
+            headers = loadHeaders(sys.argv)
+            browser = Browser()
+            browser.load(URL(sys.argv[1]), headers, browser)
+        elif isDataURI(link):   #done
+            scheme, link = link.split(":", 1)
+            fileType, content = link.split(",", 1)
+            if fileType == "text/html":
+                Browser().dataLoad(content)
+                
+        elif isViewSource(link):    #done
+            scheme, viewUrl = link.split(":", 1)
+            url = URL(viewUrl)
+            headers = loadHeaders(sys.argv)
+            Browser().srcLoad(url, headers)
+        else:
+            path = ""
+            scheme = ""
 
-    #     elif isDataURI(link):
-    #         print("Data URI detected")
-    #         scheme, link = link.split(":", 1)
-    #         fileType, content = link.split(",", 1)
-    #         if(fileType == "text/html"):
-    #             print(content)
-    #     elif isViewSource(link):
-    #         scheme, viewUrl = link.split(":", 1)
-    #         url = URL(viewUrl)
-    #         headers = loadHeaders(sys.argv)
-    #         viewLoad(url, headers)
-    #     else:
-    #         print("File detected")
-    #         loadFile(link)
+            if(len(sys.argv) < 2):
+                # open default
+                f = open("default.txt", "r")
+                txt = f.read()
+                # print(txt)
+                Browser().dataLoad(txt)
+                f.close()
+            elif "://" not in link:
+                path = sys.argv[1]
+                try:
+                    # try relative path
+                    root = os.getcwd()
+                    root = os.path.join(root, path)
+                    print(f"Root: {root} \tPath: {path}")
+                    f = open(root, "r")
+                    txt = f.read()
+                    Browser().dataLoad(txt)
+                    f.close()
+                except FileNotFoundError:
+                    Browser().dataLoad("File not found...")
+            else:
+                scheme, path = link.split("://", 1)
+                if scheme != "file":
+                    f = open("error.txt", "r")
+                    txt = f.read()
+                    Browser().dataLoad(txt)
+                    f.close()
+                try:
+                    f = open(path, "r")
+                    txt = f.read()
+                    Browser().dataLoad(txt)
+                    f.close()
+                except FileNotFoundError:
+                    Browser().dataLoad("File does not exist...")
+    tkinter.mainloop()
