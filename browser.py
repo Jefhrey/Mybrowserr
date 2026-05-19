@@ -15,6 +15,7 @@ browserCache = {}
 HSTEP = 13
 VSTEP = 18
 SCROLL_STEP = 100
+rtl = False
 
 class URL:
     def __init__(self, URL):
@@ -217,13 +218,7 @@ def isURL(arg):
                 
 def isDataURI(arg):
     return arg.startswith("data:")
-    # if "data:" not in arg:
-    #     return False
-    
-    # scheme, text = arg.split(":", 1)
-    # if(scheme == "data"): 
-    #     return True
-    
+
 
 def isViewSource(arg):
     if "view-source:" not in arg: return False
@@ -293,7 +288,8 @@ class Browser:
         global WIDTH, HEIGHT
         WIDTH = e.width
         HEIGHT = e.height
-        self.display_list = layout(self.text)
+        if(rtl): self.display_list = altLayout(self.text)
+        else: self.display_list = layout(self.text)
         self.canvas.delete("all")
         self.draw()
 
@@ -301,7 +297,8 @@ class Browser:
         body = url.request(headers, 0, browser)
         text = lex(body)
         self.text = text
-        self.display_list = altLayout(text)
+        if(rtl): self.display_list = altLayout(self.text)
+        else: self.display_list = layout(self.text)
         self.draw()
 
     def srcLoad(self, url, headers):
@@ -328,6 +325,7 @@ class Browser:
             self.scrollbar.pack_forget()
         # print(f"{num} and {num + thumbLen}")
         if len(self.display_list) == 0: return
+        print(self.display_list[0])
         for x, y, c in self.display_list:
             if y > self.scroll + HEIGHT: continue
             if y + VSTEP < self.scroll: continue
@@ -339,7 +337,7 @@ class Browser:
                 self.emojis.append(photo)
                 self.canvas.create_image(x, y - self.scroll, image= photo)
                 continue
-            self.canvas.create_text(x, y - self.scroll, text=c)
+            self.canvas.create_text(x, y - self.scroll, text=c, anchor = "e")
 
     def scrolldown(self, e):
         maxScroll = self.display_list[-1][1] - HEIGHT + VSTEP
@@ -376,14 +374,14 @@ def altLayout(text):
     cursor_x, cursor_y = WIDTH - HSTEP, VSTEP
     print("hello from alt")
     if not text: return display_list
-    for c in text:
+    for c in reversed(text):
         if c == "\n":
                 cursor_y += VSTEP
                 cursor_x = WIDTH - HSTEP
                 continue
         display_list.append((cursor_x, cursor_y, c))
         cursor_x -= HSTEP
-        if cursor_x <= 0:
+        if cursor_x <= HSTEP:
             cursor_y += VSTEP
             cursor_x = WIDTH - HSTEP
     return display_list
@@ -394,6 +392,7 @@ def altLayout(text):
 if __name__ == "__main__":
     import sys
     import os
+    if "-rtl" in sys.argv: rtl = True
     if len(sys.argv) < 2:
         Browser().dataLoad("Welcome to homepage")
     else:
