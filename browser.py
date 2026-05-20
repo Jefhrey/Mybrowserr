@@ -7,9 +7,11 @@ import gzip
 import tkinter
 import emoji
 from tkinter import ttk
+from tkinter import font
 from PIL import Image, ImageTk
 sockets = {}
 
+resizeCount = 1
 # Cache is in the form {"label": ["expiryTime", "content"]}
 browserCache = {}
 HSTEP = 13
@@ -166,30 +168,41 @@ class URL:
                 browserCache[self.host + self.path] = [expiryTime, content]
                 return
 
+class Text:
+    def __init__(self, text):
+        self.text = text
+
+class Tag:
+    def __init__(self, tag):
+        self.tag = tag
 
 def isGzip(headers):
     if headers.get("content-encoding") == "gzip": return True
     else: return False
 
 def lex(body):
-    text = ""
-    in_tag = True
-    tag = ""
+    buffer = ""
+    out = []
+    in_tag = False
     if not body: return
     for c in body:
         if c == "<":
             in_tag = True
-            tag = ""
+            if buffer: out.append(Text(buffer))
+            buffer = ""
         elif c == ">":
             in_tag = False
-            if tag.strip() in ["br", "br/", "/p"]:
-                text += "\n"
-                if tag.strip == "/p": print("The text:", text[-1] + text[-2])
-        elif in_tag:
-            tag += c
-        elif not in_tag:
-            text += c
-    return text
+            # if buffer in ["br", "br/", "/p"]:
+            #     out.append(Text("\n"))
+                # buffer += "\n"
+                # if tag.strip == "/p": print("The text:", text[-1] + text[-2])
+            out.append(Tag(buffer))
+            buffer = ""
+        else:
+            buffer += c
+    if not in_tag and buffer:
+        out.append(Text(buffer))
+    return out
 
 def loadHeaders(args):
 
@@ -228,6 +241,9 @@ WIDTH, HEIGHT = 800, 600
 class Browser:
     def __init__(self):
         self.window = tkinter.Tk()
+        # print(tkinter.font.families())
+        bi_times = tkinter.font.Font(family="Finlandica Headline",size=16)
+        self.font = bi_times
         self.canvas = tkinter.Canvas(
             self.window, 
             width=WIDTH,
@@ -285,20 +301,27 @@ class Browser:
             self.draw()
 
     def resize(self, e):
+        if(resizeCount >= 1): return
+        print("Resize fired")
         global WIDTH, HEIGHT
         WIDTH = e.width
         HEIGHT = e.height
-        if(rtl): self.display_list = altLayout(self.text)
+        if not hasattr(self, 'text'): return
+        if(rtl):    self.display_list = altLayout(self.text)
         else: self.display_list = layout(self.text)
         self.canvas.delete("all")
         self.draw()
 
     def load(self, url, headers, browser):
         body = url.request(headers, 0, browser)
-        text = lex(body)
-        self.text = text
-        if(rtl): self.display_list = altLayout(self.text)
-        else: self.display_list = layout(self.text)
+        print("Recieved response body. sart lexing...")
+        tokens = lex(body)
+        # print("token count:", len(text))
+        # self.text = text
+        print("Lexing over. Layout")
+        # if(rtl): self.display_list = altLayout(self.text)
+        self.display_list = Layout(tokens).display_list
+        print("Layout set")
         self.draw()
 
     def srcLoad(self, url, headers):
@@ -314,6 +337,7 @@ class Browser:
         self.draw()
 
     def draw(self):
+        # print("Drawing to the screen...")
         self.emojis = []
         pgLen = 1
         if len(self.display_list) > 0 : pgLen = self.display_list[-1][1]
@@ -323,21 +347,23 @@ class Browser:
         self.scrollbar.set(num, num + thumbLen)
         if num + thumbLen >= 1 and num == 0:
             self.scrollbar.pack_forget()
-        # print(f"{num} and {num + thumbLen}")
         if len(self.display_list) == 0: return
-        print(self.display_list[0])
-        for x, y, c in self.display_list:
+        for x, y, c, font in self.display_list:
             if y > self.scroll + HEIGHT: continue
             if y + VSTEP < self.scroll: continue
             if emoji.is_emoji(c):
-                fileName = "./assets/emojis/" + hex(ord(c))[2:].upper() + ".png"
-                img = Image.open(fileName)
-                img = img.resize((16, 16))
-                photo = ImageTk.PhotoImage(img)
-                self.emojis.append(photo)
-                self.canvas.create_image(x, y - self.scroll, image= photo)
+                self.drawEmoji(c, x , y)
                 continue
-            self.canvas.create_text(x, y - self.scroll, text=c, anchor = "e")
+            self.canvas.create_text(x, y - self.scroll, text=c, anchor = "nw", font = font)
+
+
+    def drawEmoji(self, emoji, x, y):
+        fileName = "./assets/emojis/" + hex(ord(emoji))[2:].upper() + ".png"
+        img = Image.open(fileName)
+        img = img.resize((16, 16))
+        photo = ImageTk.PhotoImage(img)
+        self.emojis.append(photo)
+        self.canvas.create_image(x, y - self.scroll, image= photo)
 
     def scrolldown(self, e):
         maxScroll = self.display_list[-1][1] - HEIGHT + VSTEP
@@ -353,21 +379,106 @@ class Browser:
     
     def aboutBlank(self):
         self.dataLoad("")
-def layout(text):
+
+weight = "normal"
+style = "roman"
+
+def layout(tokens):
+    global weight, style
     display_list = []
+    # font = tkinter.font.Font(family="Finlandica Headline",size=16)
     cursor_x, cursor_y = HSTEP, VSTEP
-    if not text: return display_list
-    for c in text:
-        if c == "\n":
-                cursor_y += VSTEP
-                cursor_x = HSTEP
-                continue
-        display_list.append((cursor_x, cursor_y, c))
-        cursor_x += HSTEP
-        if cursor_x >= WIDTH - HSTEP:
-            cursor_y += VSTEP
-            cursor_x = HSTEP
+    print("Creating font...")
+    myFont = tkinter.font.Font(family="Finlandica Headline",size=16)
+    print("font done")
+    if not tokens: return display_list
+    print("Processing alyout...")
+    for token in tokens:
+        if isinstance(token, Text):
+            for word in token.text.split():
+                w = myFont.measure(word)
+                display_list.append((cursor_x, cursor_y, word, myFont))
+                cursor_x += w + myFont.measure(" ")
+                if cursor_x  >= WIDTH - HSTEP:
+                    cursor_y += myFont.metrics("linespace") * 1.25
+                    cursor_x = HSTEP
+
+        elif token.tag == "i":
+            style = "italic"
+            myFont = tkinter.font.Font(family="Finlandica Headline",size=16, slant = style)
+        elif token.tag == "/i":
+            style = "roman"
+            myFont = tkinter.font.Font(family="Finlandica Headline",size=16, slant = style)
+        elif token.tag == "b":
+            weight = "bold"
+            myFont = tkinter.font.Font(family="Finlandica Headline",size=16, weight = weight)
+        elif token.tag == "/b":
+            weight = "normal"
+            myFont = tkinter.font.Font(family="Finlandica Headline",size=16, weight = weight)
+    # print("The list:", display_list)
+    print(len(display_list))
     return display_list
+
+
+class Layout:
+    def __init__(self, tokens):
+        self.display_list = []
+        self.cursor_x = HSTEP
+        self.cursor_y = VSTEP
+        self.weight = "normal"
+        self.style = "roman"
+        self.size = 16
+        self.line = []
+
+        for token in tokens:
+            self.tokenize(token)
+        self.flush()
+
+    def tokenize(self, token):
+        if isinstance(token, Text):
+            for word in token.text.split():
+                self.processWord(word)    
+        elif token.tag == "i":
+            self.style = "italic"
+        elif token.tag == "/i":
+            self.style = "roman"
+        elif token.tag == "b":
+            self.weight = "bold"
+        elif token.tag == "/b":
+            self.weight = "normal"
+        elif token.tag == "small":
+            self.size -= 2
+        elif token.tag == "/small":
+            self.size += 2
+        elif token.tag == "big":
+            self.size += 4
+        elif token.tag == "/big":
+            self.size -= 4
+        elif token.tag == "/p":
+            self.flush()
+            self.cursor_y += VSTEP
+    
+    def processWord(self, word):
+        myFont = tkinter.font.Font(family="Finlandica Headline",size=self.size, weight = self.weight, slant = self.style)
+        w = myFont.measure(word)
+        if self.cursor_x + w > WIDTH - HSTEP:
+            self.flush()
+        self.line.append((self.cursor_x, word, myFont))
+        self.cursor_x += w + myFont.measure(" ")    
+        
+    def flush(self):
+        if not self.line: return
+        metrics = [font.metrics() for x, word, font in self.line]
+        max_ascent = max([metric["ascent"] for metric in metrics])
+        baseline = self.cursor_y + 1.25 * max_ascent
+        for x, word, font in self.line:
+            y = baseline - font.metrics("ascent")
+            self.display_list.append((x, y, word, font))
+        max_descent = max([metric["descent"] for metric in metrics])
+        self.cursor_y = baseline + 1.25 * max_descent
+        self.cursor_x = HSTEP
+        self.line = []
+        
 
 def altLayout(text):
     display_list = []
@@ -375,10 +486,10 @@ def altLayout(text):
     print("hello from alt")
     if not text: return display_list
     for c in reversed(text):
-        if c == "\n":
-                cursor_y += VSTEP
-                cursor_x = WIDTH - HSTEP
-                continue
+        # if c == "\n":
+        #         cursor_y += VSTEP
+        #         cursor_x = WIDTH - HSTEP
+        #         continue
         display_list.append((cursor_x, cursor_y, c))
         cursor_x -= HSTEP
         if cursor_x <= HSTEP:
@@ -400,6 +511,7 @@ if __name__ == "__main__":
         if isURL(link):
             headers = loadHeaders(sys.argv)
             browser = Browser()
+            print("Loading url...")
             browser.load(URL(sys.argv[1]), headers, browser)
         elif isDataURI(link):   #done
             scheme, link = link.split(":", 1)
