@@ -381,7 +381,6 @@ class Browser:
 
 weight = "normal"
 style = "roman"
-
 class Layout:
     def __init__(self, tokens):
         self.display_list = []
@@ -394,9 +393,7 @@ class Layout:
         self.line_width = 0
         self.last_space = 0
 
-        if not tokens:
-            print("No response")
-        else:
+        if tokens:
             for token in tokens:
                 self.tokenize(token)
         self.flush()
@@ -405,7 +402,6 @@ class Layout:
         if isinstance(token, Text):
             for word in token.text.split():
                 self.processWord(word)
-
         elif token.tag == "i":
             self.style = "italic"
         elif token.tag == "/i":
@@ -425,17 +421,17 @@ class Layout:
         elif token.tag == "/p":
             self.flush()
             self.cursor_y += VSTEP
-    
+
     def processWord(self, word):
         myFont = self.getFont(self.size, self.weight, self.style)
         w = myFont.measure(word)
         space = myFont.measure(" ")
-        if self.line and self.line_width + w > WIDTH - HSTEP:
+        if self.line and self.line_width + w > WIDTH - 2 * HSTEP:
             self.flush()
         self.line.append((word, myFont, w))
         self.line_width += w + space
         self.last_space = space
-        
+
     def flush(self):
         if not self.line:
             return
@@ -446,8 +442,8 @@ class Layout:
         baseline = self.cursor_y + 1.25 * max_ascent
 
         if rtl:
-            # total_width = sum(w for _, _, w in self.line) + self.last_space * (len(self.line) - 1)
-            x = WIDTH - HSTEP - self.line_width
+            total_width = sum(w for _, _, w in self.line) + self.last_space * (len(self.line) - 1)
+            x = WIDTH - HSTEP - total_width
             for word, font, w in self.line:
                 y = baseline - font.metrics("ascent")
                 self.display_list.append((x, y, word, font))
@@ -472,22 +468,6 @@ class Layout:
             label = tkinter.Label(font=font)   # Dummy widget using the font for improved performance, as per official documentation
             FONTS[key] = (font, label)
         return FONTS[key][0]
-
-def altLayout(text):
-    display_list = []
-    cursor_x, cursor_y = WIDTH - HSTEP, VSTEP
-    print("hello from alt")
-    if not text: return display_list
-    for c in reversed(text):
-        display_list.append((cursor_x, cursor_y, c))
-        cursor_x -= HSTEP
-        if cursor_x <= HSTEP:
-            cursor_y += VSTEP
-            cursor_x = WIDTH - HSTEP
-    return display_list
-
-
-
 
 if __name__ == "__main__":
     import sys
