@@ -426,28 +426,34 @@ class Layout:
             self.size += 4
         elif token.tag == "/big":
             self.size -= 4
-        elif token.tag == 'h1':
-            self.size += 6
-            self.weight = "bold"
         elif token.tag == 'h1 class="title"':
             # print("h1 detected")
             self.size += 6
             self.weight = "bold"
             self.flush()
+            self.title = True
             # self.cursor_y += VSTEP
             # self.cursor_x = WIDTH/2
         elif token.tag == '/h1':
             # print("Closing h1...")
             self.size -= 6
             self.weight = "normal"
-            n = len(self.line)
-            lineWidth = self.line_width
-            start = (WIDTH - lineWidth) / 2
-            self.flush()
-            for i in range (-1, (-1 * n) - 1, -1):
-                x, a, b, c = self.display_list[i]
-                print("Centering ", b)
-                self.display_list[i] = (x+start, a, b, c)
+            if self.title:
+                n = len(self.line)
+                lineWidth = self.line_width
+                start = (WIDTH - lineWidth) / 2
+                self.flush()
+                for i in range (-1, (-1 * n) - 1, -1):
+                    x, a, b, c = self.display_list[i]
+                    print("Centering ", b)
+                    self.display_list[i] = (x+start, a, b, c)
+                self.title = False
+            else:
+                self.flush()
+        elif "h1" in token.tag:
+            print("hey, I'm normal")
+            self.size += 6
+            self.weight = "bold"
         elif token.tag == "/p":
             self.flush()
             self.cursor_y += VSTEP
