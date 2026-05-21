@@ -314,10 +314,10 @@ class Browser:
         print("Recieved response body. sart lexing...")
         tokens = lex(body)
         self.tokens = tokens
-        print("Lexing over. Layout")
+        # print("Lexing over. Layout")
         # if(rtl): self.display_list = altLayout(self.text)
         self.display_list = Layout(tokens).display_list
-        print("Layout set")
+        # print("Layout set")
         self.draw()
 
     def srcLoad(self, url, headers):
@@ -344,9 +344,6 @@ class Browser:
         if num + thumbLen >= 1 and num == 0:
             self.scrollbar.pack_forget()
         if len(self.display_list) == 0: return
-        # for i in range(0, 5):
-        #     if self.print == 1:print(self.display_list[i])
-        #     self.print = 0
         
         for x, y, c, font in self.display_list:
             # if num > 0:
@@ -397,6 +394,8 @@ class Layout:
         self.line = []
         self.line_width = 0
         self.last_space = 0
+        self.sup = False
+        self.store = {}
 
         if not tokens:
             print("No response")
@@ -445,15 +444,19 @@ class Layout:
                 self.flush()
                 for i in range (-1, (-1 * n) - 1, -1):
                     x, a, b, c = self.display_list[i]
-                    print("Centering ", b)
                     self.display_list[i] = (x+start, a, b, c)
                 self.title = False
             else:
                 self.flush()
         elif "h1" in token.tag:
-            print("hey, I'm normal")
             self.size += 6
             self.weight = "bold"
+        elif token.tag == "sup":
+            self.size = int(self.size / 2)
+            self.sup = True
+        elif token.tag == "/sup":
+            self.size = self.size * 2
+            self.sup = False
         elif token.tag == "/p":
             self.flush()
             self.cursor_y += VSTEP
@@ -462,7 +465,8 @@ class Layout:
         myFont = self.getFont(self.size, self.weight, self.style)
         w = myFont.measure(word)
         space = myFont.measure(" ")
-
+        if self.sup:
+            self.store[word] = "sup" 
         if self.line and self.line_width + w > WIDTH - HSTEP:
             # print("Width: ",WIDTH)
             self.flush()
@@ -480,7 +484,6 @@ class Layout:
         baseline = self.cursor_y + 1.25 * max_ascent
 
         if rtl:
-            # total_width = sum(w for _, _, w in self.line) + self.last_space * (len(self.line) - 1)
             x = WIDTH - HSTEP - self.line_width
             for word, font, w in self.line:
                 y = baseline - font.metrics("ascent")
@@ -491,12 +494,26 @@ class Layout:
             for word, font, w in self.line:
                 y = baseline - font.metrics("ascent")
                 self.display_list.append((x, y, word, font))
+                # print(f"{word} added to display_list")
                 x += w + font.measure(" ")
+                if self.store.get(word):
+                    x = self.fix(word, font, w, x, y, self.store.get(word))
 
         self.cursor_y = baseline + 1.25 * max_descent
         self.cursor_x = WIDTH - HSTEP if rtl else HSTEP
         self.line = []
         self.line_width = 0
+
+    def fix(self, word, font, width, x, y, operation):
+        if(operation == "sup"):
+            prevWord = self.display_list[-2] #last word is current word, prev word is behind that
+            baseline = y + font.metrics("ascent")
+            y = baseline - prevWord[3].metrics("ascent") 
+            a, b, c, d = self.display_list[-1]
+            self.display_list.pop(-1)
+            self.display_list.append((a,y, c, d))
+            del self.store[word]
+            return x
 
     def getFont(self,size, weight, style):
         key = (size, weight, style)
