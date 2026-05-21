@@ -11,7 +11,6 @@ from tkinter import font
 from PIL import Image, ImageTk
 sockets = {}
 
-resizeCount = 1
 # Cache is in the form {"label": ["expiryTime", "content"]}
 browserCache = {}
 HSTEP = 13
@@ -261,7 +260,11 @@ class Browser:
         self.print = 1
 
     def scrollEnd(self, e):
-        self.scroll = self.display_list[-1][1] - HEIGHT + VSTEP
+        font = self.display_list[-1][3]
+        m = font.metrics()
+        bonus = m["linespace"]  
+        # self.scroll = (self.display_list[-1][1] - HEIGHT + VSTEP) * 1.1
+        self.scroll = self.display_list[-1][1] - HEIGHT + VSTEP + bonus
         self.canvas.delete("all")
         self.draw()
 
@@ -280,14 +283,14 @@ class Browser:
         elif action == "moveto":
             # print("hi")
             fraction = float(args[0])  # 0.0 to 1.0 position
-            print("fraction: ", fraction)
+            # print("fraction: ", fraction)
             if(fraction < 0):
-                print(fraction,"Too high")
+                # print(fraction,"Too high")
                 return
             if fraction > (1 + (VSTEP/self.display_list[-1][1])*2):
                 maxScroll = self.display_list[-1][1] - HEIGHT
                 self.scroll = min(int(fraction * maxScroll), 1 + (VSTEP/self.display_list[-1][1])*5)
-                print(fraction, "too low")
+                # print(fraction, "too low")
                 return
             maxScroll = self.display_list[-1][1] - HEIGHT
             self.scroll = int(fraction * maxScroll)
@@ -295,12 +298,13 @@ class Browser:
             self.draw()
 
     def resize(self, e):
-        # if(resizeCount >= 1): return
-        print("Resize fired")
         global WIDTH, HEIGHT
+        # if(resizeCount >= 1): return
+        # print("Resize fired")
         WIDTH = e.width
         HEIGHT = e.height
-        if not hasattr(self, 'text'): return 
+        # print(f"New width and height: {WIDTH} & {HEIGHT}")
+        if not hasattr(self, 'tokens'): return 
         self.display_list = Layout(self.tokens).display_list
         self.canvas.delete("all")
         self.draw()
@@ -318,17 +322,17 @@ class Browser:
 
     def srcLoad(self, url, headers):
         tokens = url.request(headers, 0)
-        self.tokens = tokens
-        self.display_list = Layout(tokens).display_list
+        self.tokens = lex(tokens)
+        self.display_list = Layout(self.tokens).display_list
         self.draw()
 
     def dataLoad(self, text):
-        self.text = text
-        self.display_list = Layout(text).display_list
+        self.tokens = lex(text)
+        self.display_list = Layout(self.tokens).display_list
         self.draw()
 
     def draw(self):
-        print("Drawing to the screen...")
+        # print("Drawing to the screen...")
         self.emojis = []
         pgLen = 1
         num = 5
@@ -367,7 +371,7 @@ class Browser:
     def scrolldown(self, e):
         maxScroll = self.display_list[-1][1] - HEIGHT + VSTEP
         if self.scroll < maxScroll:
-            self.scroll = min(self.scroll + SCROLL_STEP, maxScroll)
+            self.scroll = min(self.scroll + SCROLL_STEP, maxScroll * 1.1)
         self.canvas.delete("all")
         self.draw()
 
@@ -422,6 +426,28 @@ class Layout:
             self.size += 4
         elif token.tag == "/big":
             self.size -= 4
+        elif token.tag == 'h1':
+            self.size += 6
+            self.weight = "bold"
+        elif token.tag == 'h1 class="title"':
+            # print("h1 detected")
+            self.size += 6
+            self.weight = "bold"
+            self.flush()
+            # self.cursor_y += VSTEP
+            # self.cursor_x = WIDTH/2
+        elif token.tag == '/h1':
+            # print("Closing h1...")
+            self.size -= 6
+            self.weight = "normal"
+            n = len(self.line)
+            lineWidth = self.line_width
+            start = (WIDTH - lineWidth) / 2
+            self.flush()
+            for i in range (-1, (-1 * n) - 1, -1):
+                x, a, b, c = self.display_list[i]
+                print("Centering ", b)
+                self.display_list[i] = (x+start, a, b, c)
         elif token.tag == "/p":
             self.flush()
             self.cursor_y += VSTEP
@@ -430,7 +456,9 @@ class Layout:
         myFont = self.getFont(self.size, self.weight, self.style)
         w = myFont.measure(word)
         space = myFont.measure(" ")
+
         if self.line and self.line_width + w > WIDTH - HSTEP:
+            # print("Width: ",WIDTH)
             self.flush()
         self.line.append((word, myFont, w))
         self.line_width += w + space
