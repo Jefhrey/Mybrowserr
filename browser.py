@@ -396,6 +396,8 @@ class Layout:
         self.last_space = 0
         self.sup = False
         self.store = {}
+        self.abbrCnt = 0
+        self.abbr = False
 
         if not tokens:
             print("No response")
@@ -460,51 +462,22 @@ class Layout:
         elif token.tag == "/p":
             self.flush()
             self.cursor_y += VSTEP
-    
-    # def processWord(self, word):
-    #     myFont = self.getFont(self.size, self.weight, self.style)
-    #     w = myFont.measure(word)
-    #     space = myFont.measure(" ")
-    #     if self.sup:
-    #         self.store[word] = "sup" 
-    #     if self.line and self.line_width + w > WIDTH - HSTEP:
-    #         # print("Width: ",WIDTH)
-    #         if "\N{soft hyphen}" in word:
-    #             print("Yipee")
-    #             rem = WIDTH - HSTEP - self.line_width
-    #             portion, word = word.split("\N{soft hyphen}", 1)
-    #             totalSplits = len(word.split("\N{soft hyphen}"))
-    #             splits = len(portion)
-    #             temp = ""
-    #             while len(portion) <= rem and splits < totalSplits:
-    #                 try:
-    #                     temp, word = word.split("\N{soft hyphen}", 1)
-    #                 except ValueError:
-    #                     temp = "abc"
-    #                     portion += temp
-    #                     break
-    #                 portion += temp
-                
-    #             portion = portion.replace(temp, "")
-    #             lastChar = portion[-1]
-    #             portion = portion[:-1] #remove last character
-    #             portion += "-"
-    #             size = myFont.measure(portion)
-    #             lastChar += word
-    #             word = lastChar
-    #             w = myFont.measure(word)
-    #             self.line.append((portion, myFont, size))
-    #             self.flush()
-    #         self.flush()
-    #     self.line.append((word, myFont, w))
-    #     self.line_width += w + space
-    #     self.last_space = space
+        elif token.tag == "abbr":
+            self.abbr = True
+        elif token.tag == "/abbr":
+            self.abbr = False
+            num = self.abbrCnt - 1
+            self.abbrCnt = 0
+            for i in range (-1, (-1 * num) - 1, -1):
+                print(self.display_list[i][2])
+                x, a, b, c = self.display_list[i]
+                self.display_list[i] = (x-self.last_space, a, b, c)
 
+    
     def processWord(self, word):
         myFont = self.getFont(self.size, self.weight, self.style)
         w = myFont.measure(word)
         space = myFont.measure(" ")
-
         if self.sup:
             self.store[word] = "sup"
 
@@ -546,9 +519,58 @@ class Layout:
             word = "".join(parts)
             w = myFont.measure(word)
 
+        if self.abbr:
+            self.abbrProcess(word)
+            return
+
         self.line.append((word, myFont, w))
         self.line_width += w + space
         self.last_space = space
+
+            
+    def abbrProcess(self, word):
+        temp = ""
+        upper = word[0].isupper()
+        lower = word[0].islower()
+
+        upperFont = self.getFont(self.size, self.weight, self.style)
+        lowerFont = self.getFont(self.size - 4, "bold", self.style)  
+        for letter in word:
+            if letter.isupper() and upper:
+                temp += letter
+            if letter.islower() and lower:
+                temp += letter
+            elif letter.islower(): #lower but prev is upper
+                upper = False
+                lower = True
+                text = temp.upper()
+                w = lowerFont.measure(text)
+                self.line.append((text, lowerFont,w))
+                self.line_width += w
+                temp = ""
+                self.abbrCnt += 1
+            elif letter.isupper(): #lower but prev is upper
+                upper = True
+                lower = False
+                w = upperFont.measure(temp)
+                self.line.append((temp, upperFont,w))
+                self.line_width += w
+                temp = ""
+                self.abbrCnt += 1
+
+        if temp:
+            if upper:
+                w = upperFont.measure(temp)
+                self.line.append((temp, upperFont, w))
+            else:
+                text = temp.upper()
+                w = lowerFont.measure(text)
+                self.line.append((text, lowerFont, w))
+            self.line_width += w
+            self.abbrCnt += 1
+
+
+
         
     def flush(self):
         if not self.line:
