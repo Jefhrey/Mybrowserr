@@ -461,15 +461,91 @@ class Layout:
             self.flush()
             self.cursor_y += VSTEP
     
+    # def processWord(self, word):
+    #     myFont = self.getFont(self.size, self.weight, self.style)
+    #     w = myFont.measure(word)
+    #     space = myFont.measure(" ")
+    #     if self.sup:
+    #         self.store[word] = "sup" 
+    #     if self.line and self.line_width + w > WIDTH - HSTEP:
+    #         # print("Width: ",WIDTH)
+    #         if "\N{soft hyphen}" in word:
+    #             print("Yipee")
+    #             rem = WIDTH - HSTEP - self.line_width
+    #             portion, word = word.split("\N{soft hyphen}", 1)
+    #             totalSplits = len(word.split("\N{soft hyphen}"))
+    #             splits = len(portion)
+    #             temp = ""
+    #             while len(portion) <= rem and splits < totalSplits:
+    #                 try:
+    #                     temp, word = word.split("\N{soft hyphen}", 1)
+    #                 except ValueError:
+    #                     temp = "abc"
+    #                     portion += temp
+    #                     break
+    #                 portion += temp
+                
+    #             portion = portion.replace(temp, "")
+    #             lastChar = portion[-1]
+    #             portion = portion[:-1] #remove last character
+    #             portion += "-"
+    #             size = myFont.measure(portion)
+    #             lastChar += word
+    #             word = lastChar
+    #             w = myFont.measure(word)
+    #             self.line.append((portion, myFont, size))
+    #             self.flush()
+    #         self.flush()
+    #     self.line.append((word, myFont, w))
+    #     self.line_width += w + space
+    #     self.last_space = space
+
     def processWord(self, word):
         myFont = self.getFont(self.size, self.weight, self.style)
         w = myFont.measure(word)
         space = myFont.measure(" ")
+
         if self.sup:
-            self.store[word] = "sup" 
+            self.store[word] = "sup"
+
         if self.line and self.line_width + w > WIDTH - HSTEP:
-            # print("Width: ",WIDTH)
+            soft = "\N{soft hyphen}"
+
+            if soft in word:
+                rem = WIDTH - HSTEP - self.line_width
+                parts = word.split(soft)
+
+                prefix = parts[0]
+                idx = 1
+
+                # Build the longest prefix that still fits with a visible hyphen
+                while idx < len(parts):
+                    trial = prefix + parts[idx]
+                    if myFont.measure(trial + "-") <= rem:
+                        prefix = trial
+                        idx += 1
+                    else:
+                        break
+
+                # If at least the prefix + hyphen fits, emit that part
+                if myFont.measure(prefix + "-") <= rem:
+                    hyphenated = prefix + "-"
+                    self.line.append((hyphenated, myFont, myFont.measure(hyphenated)))
+                    self.flush()
+
+                    remainder = soft.join(parts[idx:])
+                    if remainder:
+                        self.processWord(remainder)
+                    return
+                
             self.flush()
+
+        soft = "\N{soft hyphen}"
+        if soft in word:
+            parts = word.split(soft)
+            word = "".join(parts)
+            w = myFont.measure(word)
+
         self.line.append((word, myFont, w))
         self.line_width += w + space
         self.last_space = space
