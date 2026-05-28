@@ -398,6 +398,7 @@ class Layout:
         self.store = {}
         self.abbrCnt = 0
         self.abbr = False
+        self.pre = False
 
         if not tokens:
             print("No response")
@@ -408,8 +409,13 @@ class Layout:
 
     def tokenize(self, token):
         if isinstance(token, Text):
-            for word in token.text.split():
-                self.processWord(word)
+            if not self.pre:
+                for word in token.text.split():
+                    self.processWord(word)
+
+            else:
+                for word in token.text:
+                    self.processWord(word)
 
         elif token.tag == "i":
             self.style = "italic"
@@ -469,9 +475,13 @@ class Layout:
             num = self.abbrCnt - 1
             self.abbrCnt = 0
             for i in range (-1, (-1 * num) - 1, -1):
-                print(self.display_list[i][2])
                 x, a, b, c = self.display_list[i]
                 self.display_list[i] = (x-self.last_space, a, b, c)
+        elif token.tag == "pre":
+            self.pre = True
+        elif token.tag == "/pre":
+            self.pre = False
+
 
     
     def processWord(self, word):
