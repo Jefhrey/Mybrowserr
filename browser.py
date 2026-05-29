@@ -19,6 +19,7 @@ SCROLL_STEP = 100
 rtl = False
 FONTS = {}
 
+
 class URL:
     def __init__(self, URL):
         self.scheme, URL = URL.split("://", 1)
@@ -28,7 +29,7 @@ class URL:
         elif self.scheme == "https":
             self.port = 443
         if "/" not in URL:
-            URL = URL + "/"
+            URL = URL + "/" 
         self.host, URL = URL.split("/", 1)
         if ":" in self.host:
             self.host, port = self.host.split(":", 1)
@@ -169,36 +170,126 @@ class URL:
                 return
 
 class Text:
-    def __init__(self, text):
+    def __init__(self, text, parent):
         self.text = text
+        self.children = []
+        self.parent = parent
 
-class Tag:
-    def __init__(self, tag):
+    def __repr__(self):
+        return repr(self.text)
+
+class Element:
+    def __init__(self, tag, attributes,parent):
         self.tag = tag
+        self.attributes = attributes
+        self.children = []
+        self.parent = parent
 
+    def __repr__(self):
+        return "<" + self.tag + ">"
+
+
+class HTMLParser:
+    def __init__(self, body):
+        self.body = body
+        self.unfinished = []
+        self.SELF_CLOSING_TAGS = [
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "param", "source", "track", "wbr",]
+        self.HEAD_TAGS =  [
+        "base", "basefont", "bgsound", "noscript",
+        "link", "meta", "title", "style", "script",]
+    def parse(self):
+        text = ""
+        in_tag = False
+        for c in self.body:
+            if c == "<":
+                in_tag = True
+                if text: self.add_text(text)
+                text = ""
+            elif c == ">":
+                in_tag = False
+                self.add_tag(text)
+                text = ""
+            else:
+                text += c
+        if not in_tag and text:
+            self.add_text(text)
+        return self.finish()   # root node
+    
+    def add_text(self, text):
+        if text.isspace(): return
+        self.implicit_tags(None)   # adds any missing implicts tags
+        parent = self.unfinished[-1]
+        node = Text(text, parent)
+        parent.children.append(node)
+
+    def add_tag(self, tag):
+        tag, attributes = self.get_attributes(tag)
+        if tag.startswith("!"): return
+        self.implicit_tags(tag)
+        if tag.startswith("/"):
+            if len(self.unfinished) == 1: return
+            node = self.unfinished.pop()     #the opening tag of the current node
+            parent = self.unfinished[-1]    
+            parent.children.append(node)
+        elif tag in self.SELF_CLOSING_TAGS:
+            parent = self.unfinished[-1]
+            node = Element(tag, attributes,parent)
+            parent.children.append(node)
+        else:
+            parent = self.unfinished[-1] if self.unfinished else None
+            node = Element(tag,attributes, parent)
+            self.unfinished.append(node)
+
+    def finish(self):
+        if not self.unfinished:
+            self.implicit_tags(None)
+        while len(self.unfinished) > 1:
+            node = self.unfinished.pop()
+            parent = self.unfinished[-1]
+            parent.children.append(node)
+        return self.unfinished.pop()
+
+    def implicit_tags(self, tag):
+        while True:
+            open_tags = [node.tag for node in self.unfinished]
+            if open_tags == [] and tag != "html":
+                self.add_tag("html")
+            elif open_tags == ["html"] \
+                and tag not in ["head", "body", "/html"]:
+                if tag in self.HEAD_TAGS:
+                    self.add_tag("head")
+                else:
+                    self.add_tag("body")
+            elif open_tags == ["html", "head"] and \
+                tag not in ["/head"] + self.HEAD_TAGS:
+                self.add_tag("/head")
+            else:
+                break
+    def get_attributes(self, text):
+        parts = text.split()
+        tag = parts[0].casefold()
+        attributes = {}
+        for attrpair in parts[1:]:
+            if "=" in attrpair:
+                key, value = attrpair.split("=", 1)
+                if len(value) > 2 and value[0] in ["'", "\""]:
+                    value = value[1:-1]
+                attributes[key.casefold()] = value
+            else:
+                attributes[attrpair.casefold()] = ""
+        return tag, attributes
+
+def print_tree(node, indent=0):
+    print(" " * indent, node)
+    for child in node.children:
+        print_tree(child, indent + 2)
+    
 def isGzip(headers):
     if headers.get("content-encoding") == "gzip": return True
     else: return False
 
-def lex(body):
-    buffer = ""
-    out = []
-    in_tag = False
-    if not body: return
-    for c in body:
-        if c == "<":
-            in_tag = True
-            if buffer: out.append(Text(buffer))
-            buffer = ""
-        elif c == ">":
-            in_tag = False
-            out.append(Tag(buffer))
-            buffer = ""
-        else:
-            buffer += c
-    if not in_tag and buffer:
-        out.append(Text(buffer))
-    return out
 
 def loadHeaders(args):
 
@@ -304,21 +395,24 @@ class Browser:
         WIDTH = e.width
         HEIGHT = e.height
         # print(f"New width and height: {WIDTH} & {HEIGHT}")
-        if not hasattr(self, 'tokens'): return 
-        self.display_list = Layout(self.tokens).display_list
+        if not hasattr(self, 'nodes'): return
+        self.display_list = Layout(self.nodes).display_list
         self.canvas.delete("all")
         self.draw()
 
-    def load(self, url, headers, browser):
+    def load(self, url, headers, browser):        
         body = url.request(headers, 0, browser)
-        print("Recieved response body. sart lexing...")
-        tokens = lex(body)
-        self.tokens = tokens
-        # print("Lexing over. Layout")
-        # if(rtl): self.display_list = altLayout(self.text)
-        self.display_list = Layout(tokens).display_list
-        # print("Layout set")
+        self.nodes = HTMLParser(body).parse()
+        self.display_list = Layout(self.nodes).display_list
         self.draw()
+        # body = url.request(headers, 0, browser)
+        # nodes = HTMLParser(body).parse()
+        # print_tree(nodes)
+        # print("Recieved response body. sart lexing...")
+        # tokens = lex(body)
+        # self.tokens = tokens
+        # self.display_list = Layout(tokens).display_list
+        # self.draw()
 
     def srcLoad(self, url, headers):
         tokens = url.request(headers, 0)
@@ -403,45 +497,57 @@ class Layout:
         if not tokens:
             print("No response")
         else:
-            for token in tokens:
-                self.tokenize(token)
+        #     for token in tokens:
+        #         self.tokenize(token)
+        # self.flush()
+            self.recurse(tokens)
         self.flush()
 
-    def tokenize(self, token):
-        if isinstance(token, Text):
-            if not self.pre:
-                for word in token.text.split():
-                    self.processWord(word)
+    def recurse(self, tree):
+        if isinstance(tree, Text):
+            for word in tree.text.split():
+                self.processWord(word)
+        else:
+            self.open_tag(tree)
+            for child in tree.children:
+                self.recurse(child)
+            self.close_tag(tree)
 
-            else:
-                for word in token.text:
-                    self.processWord(word)
-
-        elif token.tag == "i":
+    def open_tag(self, token):
+        if token.tag == "i":
             self.style = "italic"
-        elif token.tag == "/i":
-            self.style = "roman"
         elif token.tag == "b":
             self.weight = "bold"
-        elif token.tag == "/b":
-            self.weight = "normal"
         elif token.tag == "small":
             self.size -= 2
-        elif token.tag == "/small":
-            self.size += 2
         elif token.tag == "big":
             self.size += 4
-        elif token.tag == "/big":
-            self.size -= 4
-        elif token.tag == 'h1 class="title"':
-            # print("h1 detected")
+        elif token.tag == 'h1' and token.attributes.get("class") == "title":
             self.size += 6
             self.weight = "bold"
             self.flush()
             self.title = True
-            # self.cursor_y += VSTEP
-            # self.cursor_x = WIDTH/2
-        elif token.tag == '/h1':
+        elif "h1" in token.tag:
+            self.size += 6
+            self.weight = "bold"
+        elif token.tag == "sup":
+            self.size = int(self.size / 2)
+            self.sup = True
+        elif token.tag == "abbr":
+            self.abbr = True
+        elif token.tag == "pre":
+            self.pre = True
+
+    def close_tag(self, token):
+        if token.tag == "i":
+            self.style = "roman"
+        elif token.tag == "b":
+            self.weight = "normal"
+        elif token.tag == "small":
+            self.size += 2
+        elif token.tag == "big":
+            self.size -= 4
+        elif token.tag == 'h1':
             # print("Closing h1...")
             self.size -= 6
             self.weight = "normal"
@@ -456,21 +562,13 @@ class Layout:
                 self.title = False
             else:
                 self.flush()
-        elif "h1" in token.tag:
-            self.size += 6
-            self.weight = "bold"
         elif token.tag == "sup":
-            self.size = int(self.size / 2)
-            self.sup = True
-        elif token.tag == "/sup":
             self.size = self.size * 2
             self.sup = False
-        elif token.tag == "/p":
+        elif token.tag == "p":
             self.flush()
             self.cursor_y += VSTEP
         elif token.tag == "abbr":
-            self.abbr = True
-        elif token.tag == "/abbr":
             self.abbr = False
             num = self.abbrCnt - 1
             self.abbrCnt = 0
@@ -478,11 +576,7 @@ class Layout:
                 x, a, b, c = self.display_list[i]
                 self.display_list[i] = (x-self.last_space, a, b, c)
         elif token.tag == "pre":
-            self.pre = True
-        elif token.tag == "/pre":
-            self.pre = False
-
-
+                self.pre = False
     
     def processWord(self, word):
         myFont = self.getFont(self.size, self.weight, self.style)
@@ -651,6 +745,11 @@ def altLayout(text):
 if __name__ == "__main__":
     import sys
     import os
+    # browser = Browser()
+    # body = URL(sys.argv[1]).request({}, 1, browser)
+    # nodes = HTMLParser(body).parse()
+    # print_tree(nodes)
+
     if "-rtl" in sys.argv: rtl = True
     if len(sys.argv) < 2:
         Browser().dataLoad("Welcome to homepage")
