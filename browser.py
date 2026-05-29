@@ -199,6 +199,7 @@ class HTMLParser:
         self.HEAD_TAGS =  [
         "base", "basefont", "bgsound", "noscript",
         "link", "meta", "title", "style", "script",]
+        self.SIBILINGS = ["p", "li"]
     def parse(self):
         text = ""
         in_tag = False
@@ -214,7 +215,8 @@ class HTMLParser:
             elif c == ">":
                 if comment:
                     if text.endswith("--"):
-                        self.comment = False
+                        comment = False
+                        text = ""
                         continue
                     else:continue
                 in_tag = False
@@ -240,7 +242,7 @@ class HTMLParser:
         if tag.startswith("/"):
             if len(self.unfinished) == 1: return
             node = self.unfinished.pop()     #the opening tag of the current node
-            parent = self.unfinished[-1]    
+            parent = self.unfinished[-1]  
             parent.children.append(node)
         elif tag in self.SELF_CLOSING_TAGS:
             parent = self.unfinished[-1]
@@ -248,6 +250,11 @@ class HTMLParser:
             parent.children.append(node)
         else:
             parent = self.unfinished[-1] if self.unfinished else None
+            if (tag == "li" and parent.tag == "ul") or (tag in self.SIBILINGS and parent.tag == tag):
+                # Close the preivous tag, make it a sibiling
+                parent = self.unfinished[-2]
+                node = self.unfinished.pop()
+                parent.children.append(node)
             node = Element(tag,attributes, parent)
             self.unfinished.append(node)
 
@@ -412,6 +419,7 @@ class Browser:
     def load(self, url, headers, browser):        
         body = url.request(headers, 0, browser)
         self.nodes = HTMLParser(body).parse()
+        print_tree(self.nodes)
         self.display_list = Layout(self.nodes).display_list
         self.draw()
         # body = url.request(headers, 0, browser)
@@ -514,8 +522,12 @@ class Layout:
 
     def recurse(self, tree):
         if isinstance(tree, Text):
-            for word in tree.text.split():
-                self.processWord(word)
+            if not self.pre:
+                for word in tree.text.split():
+                    self.processWord(word)
+            else:
+                for word in tree.text:
+                    self.processWord(word)
         else:
             self.open_tag(tree)
             for child in tree.children:
@@ -546,6 +558,10 @@ class Layout:
             self.abbr = True
         elif token.tag == "pre":
             self.pre = True
+        elif token.tag == "p":
+            self.flush()
+            self.cursor_y += VSTEP
+
 
     def close_tag(self, token):
         if token.tag == "i":
