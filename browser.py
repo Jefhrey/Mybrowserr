@@ -202,12 +202,21 @@ class HTMLParser:
     def parse(self):
         text = ""
         in_tag = False
+        comment = False
         for c in self.body:
+            if in_tag and text.startswith("!--"):
+                comment = True
             if c == "<":
-                in_tag = True
-                if text: self.add_text(text)
-                text = ""
+                if not comment:
+                    in_tag = True
+                    if text: self.add_text(text)
+                    text = ""
             elif c == ">":
+                if comment:
+                    if text.endswith("--"):
+                        self.comment = False
+                        continue
+                    else:continue
                 in_tag = False
                 self.add_tag(text)
                 text = ""
