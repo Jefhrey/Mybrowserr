@@ -200,6 +200,7 @@ class HTMLParser:
         "base", "basefont", "bgsound", "noscript",
         "link", "meta", "title", "style", "script",]
         self.SIBILINGS = ["p", "li"]
+        self.js = False
     def parse(self):
         text = ""
         in_tag = False
@@ -208,6 +209,9 @@ class HTMLParser:
             if in_tag and text.startswith("!--"):
                 comment = True
             if c == "<":
+                if self.js: 
+                    text += c
+                    continue
                 if not comment:
                     in_tag = True
                     if text: self.add_text(text)
@@ -219,6 +223,18 @@ class HTMLParser:
                         text = ""
                         continue
                     else:continue
+
+                elif text.endswith("</script"):
+                    self.js = False
+                    text = text[:-7]   #stripping last 7 characters i.e </script
+                                        # Future room for adding js when needed
+                    text = "</script"
+                elif text.startswith("script") and not self.js and in_tag:
+                    self.js = True
+                elif self.js:
+                    text += c
+                    continue
+                
                 in_tag = False
                 self.add_tag(text)
                 text = ""
@@ -250,7 +266,7 @@ class HTMLParser:
             parent.children.append(node)
         else:
             parent = self.unfinished[-1] if self.unfinished else None
-            if (tag == "li" and parent.tag == "ul") or (tag in self.SIBILINGS and parent.tag == tag):
+            if (tag in self.SIBILINGS and parent.tag == tag):
                 # Close the preivous tag, make it a sibiling
                 parent = self.unfinished[-2]
                 node = self.unfinished.pop()
@@ -419,17 +435,9 @@ class Browser:
     def load(self, url, headers, browser):        
         body = url.request(headers, 0, browser)
         self.nodes = HTMLParser(body).parse()
-        print_tree(self.nodes)
+        # print_tree(self.nodes)
         self.display_list = Layout(self.nodes).display_list
         self.draw()
-        # body = url.request(headers, 0, browser)
-        # nodes = HTMLParser(body).parse()
-        # print_tree(nodes)
-        # print("Recieved response body. sart lexing...")
-        # tokens = lex(body)
-        # self.tokens = tokens
-        # self.display_list = Layout(tokens).display_list
-        # self.draw()
 
     def srcLoad(self, url, headers):
         tokens = url.request(headers, 0)
