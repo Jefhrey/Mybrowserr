@@ -201,14 +201,32 @@ class HTMLParser:
         "link", "meta", "title", "style", "script",]
         self.SIBILINGS = ["p", "li"]
         self.js = False
+        self.quoteAttr = {}
     def parse(self):
         text = ""
         in_tag = False
+        in_quotes = False
         comment = False
         for c in self.body:
             if in_tag and text.startswith("!--"):
                 comment = True
-            if c == "<":
+            if c == '"':
+                in_quotes = not in_quotes
+                if not in_quotes and "=" in text:
+                    x = text.strip()
+                    txt, val = text.rsplit("=", 1)
+                    txt = txt.strip()
+                    key = txt.split()[-1]
+                    self.quoteAttr[key.casefold()] = val
+                    n = len(key)
+                    print("looook:", key+ " " + val)
+                    text = txt[:-n] #Attribute has been removed
+            
+                continue
+            if in_quotes:
+                text += c
+                continue 
+            elif c == "<":
                 if self.js: 
                     text += c
                     continue
@@ -227,7 +245,7 @@ class HTMLParser:
                 elif text.endswith("</script"):
                     self.js = False
                     text = text[:-7]   #stripping last 7 characters i.e </script
-                                        # Future room for adding js when needed
+                                        # Future room for adding js when neeeded        
                     text = "</script"
                 elif text.startswith("script") and not self.js and in_tag:
                     self.js = True
@@ -309,8 +327,15 @@ class HTMLParser:
                 if len(value) > 2 and value[0] in ["'", "\""]:
                     value = value[1:-1]
                 attributes[key.casefold()] = value
+                if key.casefold() in self.quoteAttr:
+                    del self.quoteAttr[key.casefold()]
             else:
                 attributes[attrpair.casefold()] = ""
+
+        # Combine quoted attributes
+        attributes.update(self.quoteAttr)
+        self.quoteAttr = {}
+        print("Detected tags: ", attributes)
         return tag, attributes
 
 def print_tree(node, indent=0):
