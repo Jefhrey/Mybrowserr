@@ -205,27 +205,18 @@ class HTMLParser:
     def parse(self):
         text = ""
         in_tag = False
-        in_quotes = False
+        # in_quotes = False
         comment = False
         for c in self.body:
+            if comment:
+                text += c
+                if text.endswith("-->"):
+                    comment = False
+                    in_tag = False
+                    text = ""
+                continue
             if in_tag and text.startswith("!--"):
                 comment = True
-            if c == '"':
-                in_quotes = not in_quotes
-                if not in_quotes and "=" in text:
-                    x = text.strip()
-                    txt, val = text.rsplit("=", 1)
-                    txt = txt.strip()
-                    key = txt.split()[-1]
-                    self.quoteAttr[key.casefold()] = val
-                    n = len(key)
-                    print("looook:", key+ " " + val)
-                    text = txt[:-n] #Attribute has been removed
-            
-                continue
-            if in_quotes:
-                text += c
-                continue 
             elif c == "<":
                 if self.js: 
                     text += c
@@ -238,6 +229,7 @@ class HTMLParser:
                 if comment:
                     if text.endswith("--"):
                         comment = False
+                        in_tag = False
                         text = ""
                         continue
                     else:continue
@@ -317,26 +309,56 @@ class HTMLParser:
                 self.add_tag("/head")
             else:
                 break
-    def get_attributes(self, text):
-        parts = text.split()
-        tag = parts[0].casefold()
-        attributes = {}
-        for attrpair in parts[1:]:
-            if "=" in attrpair:
-                key, value = attrpair.split("=", 1)
-                if len(value) > 2 and value[0] in ["'", "\""]:
-                    value = value[1:-1]
-                attributes[key.casefold()] = value
-                if key.casefold() in self.quoteAttr:
-                    del self.quoteAttr[key.casefold()]
-            else:
-                attributes[attrpair.casefold()] = ""
 
-        # Combine quoted attributes
-        attributes.update(self.quoteAttr)
-        self.quoteAttr = {}
-        print("Detected tags: ", attributes)
-        return tag, attributes
+    def get_attributes(self, text):
+        temp = text
+        tag = temp.split()[0]
+        n = len(tag)
+        temp = temp[n:]
+        temp = temp.strip()
+        print(temp)
+        keys = [] #last word in every entry of parts is an attribute
+        values = []
+        attributes = {}
+        in_quotes = False
+        is_key = True
+        text = ""
+        for c in temp:
+            if is_key and c == " " and len(text) == 0:
+                continue
+            if c == "=" and not in_quotes:
+                is_key = False
+                keys.append(text.strip())
+                text = ""
+                continue
+            if c in ['"', "'"]:
+                # is_key = not is_key
+                in_quotes = not in_quotes
+                if not in_quotes:
+                    values.append(text)
+                    text = ""
+                    is_key = True
+                continue
+            if not in_quotes and not is_key:
+                if c == " ":
+                    if len(text) > 0:
+                        values.append(text)
+                        text = ""
+                        is_key = True
+                        continue
+                    if len(text) == 0:
+                        continue
+                else:
+                    text += c
+
+            else:
+                text += c
+
+        for i in range(0, len(keys)):
+            attributes[keys[i]] = values[i]
+
+        print(f"The tag: {tag}\nThe Attributes: {attributes}")
+        return tag, attributes             
 
 def print_tree(node, indent=0):
     print(" " * indent, node)
@@ -464,9 +486,9 @@ class Browser:
         self.display_list = Layout(self.nodes).display_list
         self.draw()
 
-    def srcLoad(self, url, headers):
-        tokens = url.request(headers, 0)
-        self.tokens = lex(tokens)
+    def srcLoad(self, url, headers, browser):
+        body = url.request(headers, 0, browser)
+        self.nodes = SrcParser(body).parse()
         self.display_list = Layout(self.tokens).display_list
         self.draw()
 
@@ -490,9 +512,6 @@ class Browser:
         if len(self.display_list) == 0: return
         
         for x, y, c, font in self.display_list:
-            # if num > 0:
-            # print(f"x: {x} y: {y} c: {c}")
-                # num -= 1
             if y > self.scroll + HEIGHT: continue
             if y + VSTEP < self.scroll: continue
             if emoji.is_emoji(c):
@@ -547,9 +566,6 @@ class Layout:
         if not tokens:
             print("No response")
         else:
-        #     for token in tokens:
-        #         self.tokenize(token)
-        # self.flush()
             self.recurse(tokens)
         self.flush()
 
@@ -650,6 +666,7 @@ class Layout:
                 rem = WIDTH - HSTEP - self.line_width
                 parts = word.split(soft)
 
+                
                 prefix = parts[0]
                 idx = 1
 
@@ -803,10 +820,10 @@ def altLayout(text):
 if __name__ == "__main__":
     import sys
     import os
-    # browser = Browser()
-    # body = URL(sys.argv[1]).request({}, 1, browser)
-    # nodes = HTMLParser(body).parse()
-    # print_tree(nodes)
+    browser = Browser()
+    body = URL(sys.argv[1]).request({}, 1, browser)
+    nodes = HTMLParser(body).parse()
+    print_tree(nodes)
 
     if "-rtl" in sys.argv: rtl = True
     if len(sys.argv) < 2:
