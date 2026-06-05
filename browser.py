@@ -203,6 +203,8 @@ class HTMLParser:
         self.js = False
         self.in_tag = False
         self.comment = False
+        self.TEXT_FORMAT = ["b", "i", "/b", "/i"]
+        self.txt_track = []
     def parse(self):
         self.text = ""
         for c in self.body:
@@ -214,6 +216,8 @@ class HTMLParser:
                 self.text = ""
             elif c == ">":
                 self.in_tag = False
+                if self.handle_txt_format():
+                    continue
                 self.add_tag(self.text)
                 self.text = ""
             else:
@@ -223,7 +227,29 @@ class HTMLParser:
         return self.finish()
                 
 
-    
+    def handle_txt_format(self):
+        print("HANDLING!")
+        # Check if txt tag
+        if self.text not in self.TEXT_FORMAT:
+            return False
+        if not self.text.startswith("/"):
+            self.txt_track.append(self.text)
+            return False
+        if not self.txt_track:
+            return False
+        # We have a closing tag, with a non empty track
+        dad = self.txt_track[-1]
+        if ("/" + dad) == self.text:
+            return False
+        else:
+            # Close the dad tag, open the curr tag and then reopen the dad tag
+            print("INTERCEPTING!")
+            self.add_tag("/" + dad)
+            self.add_tag(self.text)
+            self.add_tag(dad)
+            self.text = ""
+            return True
+        
     def is_ignore(self, c):
         if c == "<":
             # is already comment or script
@@ -263,13 +289,8 @@ class HTMLParser:
             self.comment = True
             self.text += c
             return True
-        
-
         return False
                 
-        
-
-
     def add_text(self, text):
         if text.isspace(): return
         self.implicit_tags(None)   # adds any missing implicts tags
@@ -846,9 +867,6 @@ class Layout:
                 self.line.append((text, lowerFont, w))
             self.line_width += w
             self.abbrCnt += 1
-
-
-
         
     def flush(self):
         if not self.line:
@@ -899,21 +917,6 @@ class Layout:
             label = tkinter.Label(font=font)   # Dummy widget using the font for improved performance, as per official documentation
             FONTS[key] = (font, label)
         return FONTS[key][0]
-
-def altLayout(text):
-    display_list = []
-    cursor_x, cursor_y = WIDTH - HSTEP, VSTEP
-    print("hello from alt")
-    if not text: return display_list
-    for c in reversed(text):
-        display_list.append((cursor_x, cursor_y, c))
-        cursor_x -= HSTEP
-        if cursor_x <= HSTEP:
-            cursor_y += VSTEP
-            cursor_x = WIDTH - HSTEP
-    return display_list
-
-
 
 
 if __name__ == "__main__":

@@ -899,22 +899,23 @@ class Layout:
             label = tkinter.Label(font=font)   # Dummy widget using the font for improved performance, as per official documentation
             FONTS[key] = (font, label)
         return FONTS[key][0]
-
-def altLayout(text):
-    display_list = []
-    cursor_x, cursor_y = WIDTH - HSTEP, VSTEP
-    print("hello from alt")
-    if not text: return display_list
-    for c in reversed(text):
-        display_list.append((cursor_x, cursor_y, c))
-        cursor_x -= HSTEP
-        if cursor_x <= HSTEP:
-            cursor_y += VSTEP
-            cursor_x = WIDTH - HSTEP
-    return display_list
-
-
-
+    
+# class srcLayout(Layout):
+#     def recurse(self, tree, indent = 0):
+#         if isinstance(tree, Text):
+#             if not self.pre:
+#                 for word in tree.text.split():
+#                     word += " " * indent
+#                     self.processWord(word)
+#             else:
+#                 for word in tree.text:
+#                     word += " " * indent
+#                     self.processWord(word)
+#         else:
+#             self.open_tag(tree)
+#             for child in tree.children:
+#                 self.recurse(child, indent + 2)
+#             self.close_tag(tree)
 
 if __name__ == "__main__":
     import sys
