@@ -27,3 +27,4 @@ A Python browser built while following *Web Browser Engineering* through chapter
 ## Status
 
 This is an educational browser, not a production browser. It is intentionally incomplete but already demonstrates request handling, parsing, layout, and rendering in one pipeline.
+![alt text](assets/image.png)
