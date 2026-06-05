@@ -208,6 +208,7 @@ class HTMLParser:
     def parse(self):
         self.text = ""
         for c in self.body:
+            # print(self.text)
             if self.is_ignore(c):
                 continue
             elif c == "<":
@@ -228,7 +229,6 @@ class HTMLParser:
                 
 
     def handle_txt_format(self):
-        print("HANDLING!")
         # Check if txt tag
         if self.text not in self.TEXT_FORMAT:
             return False
@@ -243,7 +243,6 @@ class HTMLParser:
             return False
         else:
             # Close the dad tag, open the curr tag and then reopen the dad tag
-            print("INTERCEPTING!")
             self.add_tag("/" + dad)
             self.add_tag(self.text)
             self.add_tag(dad)
@@ -350,52 +349,61 @@ class HTMLParser:
     def get_attributes(self, text):
         temp = text
         tag = temp.split()[0]
-        n = len(tag)
-        temp = temp[n:]
-        temp = temp.strip()
-        # print(temp) 
-        keys = [] #last word in every entry of parts is an attribute
-        values = []
+        temp = temp[len(tag):].strip()
+
         attributes = {}
-        in_quotes = False
-        is_key = True
-        text = ""
-        for c in temp:
-            if is_key and c == " " and len(text) == 0:
-                continue
-            if c == "=" and not in_quotes:
-                is_key = False
-                keys.append(text.strip())
-                text = ""
-                continue
-            if c in ['"', "'"]:
-                # is_key = not is_key
-                in_quotes = not in_quotes
-                if not in_quotes:
-                    values.append(text)
-                    text = ""
-                    is_key = True
-                continue
-            if not in_quotes and not is_key:
-                if c == " ":
-                    if len(text) > 0:
-                        values.append(text)
-                        text = ""
-                        is_key = True
-                        continue
-                    if len(text) == 0:
-                        continue
-                else:
-                    text += c
+        i = 0
+        n = len(temp)
 
+        while i < n:
+            while i < n and temp[i].isspace():
+                i += 1
+            if i >= n:
+                break
+
+            # read attribute name
+            start = i
+            while i < n and temp[i] not in ["=", " "]:
+                i += 1
+            key = temp[start:i].strip()
+
+            while i < n and temp[i].isspace():
+                i += 1
+
+            # boolean attribute: no value
+            if i >= n or temp[i] != "=":
+                if key:
+                    attributes[key] = ""
+                continue
+
+            i += 1  # skip '='
+            while i < n and temp[i].isspace():
+                i += 1
+
+            if i >= n:
+                attributes[key] = ""
+                break
+
+            # quoted value
+            if temp[i] in ['"', "'"]:
+                quote = temp[i]
+                i += 1
+                start = i
+                while i < n and temp[i] != quote:
+                    i += 1
+                value = temp[start:i]
+                i += 1  # skip closing quote
             else:
-                text += c
+                # unquoted value
+                start = i
+                while i < n and not temp[i].isspace():
+                    i += 1
+                value = temp[start:i]
 
-        for i in range(0, len(keys)):
-            attributes[keys[i]] = values[i]
+            attributes[key] = value
 
-        print(f"The tag: {tag}\nThe Attributes: {attributes}")
-        return tag, attributes             
+        return tag, attributes
+          
 class SrcParser(HTMLParser):
     def parse(self):
         self.text = ""

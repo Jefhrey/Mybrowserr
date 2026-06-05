@@ -1,9 +1,0 @@
-Loading url...
-The final request:
- GET /html.html HTTP/1.1
-Host: browser.engineering
-Connection: keep-alive
-User-Agent: Jef
-Accept-Encoding: gzip
-
-
