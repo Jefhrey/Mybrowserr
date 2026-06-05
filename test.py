@@ -11,7 +11,6 @@ from tkinter import font
 from PIL import Image, ImageTk
 sockets = {}
 
-resizeCount = 1
 # Cache is in the form {"label": ["expiryTime", "content"]}
 browserCache = {}
 HSTEP = 13
@@ -19,6 +18,7 @@ VSTEP = 18
 SCROLL_STEP = 100
 rtl = False
 FONTS = {}
+
 
 class URL:
     def __init__(self, URL):
@@ -29,7 +29,7 @@ class URL:
         elif self.scheme == "https":
             self.port = 443
         if "/" not in URL:
-            URL = URL + "/"
+            URL = URL + "/" 
         self.host, URL = URL.split("/", 1)
         if ":" in self.host:
             self.host, port = self.host.split(":", 1)
@@ -170,36 +170,301 @@ class URL:
                 return
 
 class Text:
-    def __init__(self, text):
+    def __init__(self, text, parent):
         self.text = text
+        self.children = []
+        self.parent = parent
 
-class Tag:
-    def __init__(self, tag):
+    def __repr__(self):
+        return repr(self.text)
+
+class Element:
+    def __init__(self, tag, attributes,parent):
         self.tag = tag
+        self.attributes = attributes
+        self.children = []
+        self.parent = parent
 
+    def __repr__(self):
+        return "<" + self.tag + ">"
+
+
+class HTMLParser:
+    def __init__(self, body):
+        self.body = body
+        self.unfinished = []
+        self.SELF_CLOSING_TAGS = [
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "param", "source", "track", "wbr",]
+        self.HEAD_TAGS =  [
+        "base", "basefont", "bgsound", "noscript",
+        "link", "meta", "title", "style", "script",]
+        self.SIBILINGS = ["p", "li"]
+        self.js = False
+        self.in_tag = False
+        self.comment = False
+    def parse(self):
+        self.text = ""
+        for c in self.body:
+            if self.is_ignore(c):
+                continue
+            elif c == "<":
+                self.in_tag = True
+                if self.text: self.add_text(self.text)
+                self.text = ""
+            elif c == ">":
+                self.in_tag = False
+                self.add_tag(self.text)
+                self.text = ""
+            else:
+                self.text += c
+        if not self.in_tag and self.text:
+            self.add_text(self.text)
+        return self.finish()
+                
+
+    
+    def is_ignore(self, c):
+        if c == "<":
+            # is already comment or script
+            if self.comment or self.js:
+                self.text += c
+                return True
+        
+        if c == ">":
+            # does it end a comment?
+            if self.comment and self.text.endswith("--"):
+                self.comment = False
+                # TODO: handle comment node
+                self.text = ""
+                return True
+            # does it end a script?
+            elif self.js and self.text.endswith("</script"):
+                self.js = False
+                script = self.text[:-7]
+                # Add the script tag
+                tag = script.split(">", 1)[0]
+                self.add_tag(tag)
+                self.text = ""
+                return True
+            # Is a script starting?
+            if self.in_tag and self.text.startswith("script"):
+                self.js = True
+                self.add_tag(self.text)
+                self.in_tag = False
+                self.text = ""
+                return True
+            
+        if self.comment or self.js:
+            self.text += c
+            return True
+        # Is a comment starting?
+        if self.in_tag and self.text.startswith("!--"):
+            self.comment = True
+            self.text += c
+            return True
+        
+
+        return False
+                
+        
+
+
+    def add_text(self, text):
+        if text.isspace(): return
+        self.implicit_tags(None)   # adds any missing implicts tags
+        parent = self.unfinished[-1]
+        node = Text(text, parent)
+        parent.children.append(node)
+
+    def add_tag(self, tag):
+        tag, attributes = self.get_attributes(tag)
+        if tag.startswith("!"): return
+        self.implicit_tags(tag)
+        if tag.startswith("/"):
+            if len(self.unfinished) == 1: return
+            node = self.unfinished.pop()     #the opening tag of the current node
+            parent = self.unfinished[-1]  
+            parent.children.append(node)
+        elif tag in self.SELF_CLOSING_TAGS:
+            parent = self.unfinished[-1]
+            node = Element(tag, attributes,parent)
+            parent.children.append(node)
+        else:
+            parent = self.unfinished[-1] if self.unfinished else None
+            if (tag in self.SIBILINGS and parent.tag == tag):
+                # Close the preivous tag, make it a sibiling
+                parent = self.unfinished[-2]
+                node = self.unfinished.pop()
+                parent.children.append(node)
+            node = Element(tag,attributes, parent)
+            self.unfinished.append(node)
+
+    def finish(self):
+        if not self.unfinished:
+            self.implicit_tags(None)
+        while len(self.unfinished) > 1:
+            node = self.unfinished.pop()
+            parent = self.unfinished[-1]
+            parent.children.append(node)
+        return self.unfinished.pop()
+
+    def implicit_tags(self, tag):
+        while True:
+            open_tags = [node.tag for node in self.unfinished]
+            if open_tags == [] and tag != "html":
+                self.add_tag("html")
+            elif open_tags == ["html"] \
+                and tag not in ["head", "body", "/html"]:
+                if tag in self.HEAD_TAGS:
+                    self.add_tag("head")
+                else:
+                    self.add_tag("body")
+            elif open_tags == ["html", "head"] and \
+                tag not in ["/head"] + self.HEAD_TAGS:
+                self.add_tag("/head")
+            else:
+                break
+
+    def get_attributes(self, text):
+        temp = text
+        tag = temp.split()[0]
+        n = len(tag)
+        temp = temp[n:]
+        temp = temp.strip()
+        # print(temp) 
+        keys = [] #last word in every entry of parts is an attribute
+        values = []
+        attributes = {}
+        in_quotes = False
+        is_key = True
+        text = ""
+        for c in temp:
+            if is_key and c == " " and len(text) == 0:
+                continue
+            if c == "=" and not in_quotes:
+                is_key = False
+                keys.append(text.strip())
+                text = ""
+                continue
+            if c in ['"', "'"]:
+                # is_key = not is_key
+                in_quotes = not in_quotes
+                if not in_quotes:
+                    values.append(text)
+                    text = ""
+                    is_key = True
+                continue
+            if not in_quotes and not is_key:
+                if c == " ":
+                    if len(text) > 0:
+                        values.append(text)
+                        text = ""
+                        is_key = True
+                        continue
+                    if len(text) == 0:
+                        continue
+                else:
+                    text += c
+
+            else:
+                text += c
+
+        for i in range(0, len(keys)):
+            attributes[keys[i]] = values[i]
+
+        print(f"The tag: {tag}\nThe Attributes: {attributes}")
+        return tag, attributes             
+class SrcParser(HTMLParser):
+    def parse(self):
+        self.text = ""
+        for c in self.body:
+            if self.is_ignore(c):
+                continue
+            elif c == "<":
+                self.in_tag = True
+                if self.text:
+                    self.add_tag("pre") 
+                    self.add_tag("b")
+                    self.add_text(self.text)
+                    self.add_tag("/b")
+                    self.add_tag("/pre") 
+                self.text = ""
+            elif c == ">":
+                self.in_tag = False
+                self.add_tag("br")
+                self.add_text("<" + self.text + ">")
+                self.add_tag("br")
+                self.text = ""
+            else:
+                self.text += c
+        if not self.in_tag and self.text:
+            self.add_text(self.text)
+        return self.finish()
+    
+    def is_ignore(self, c):
+        if c == "<":
+            # is already comment or script
+            if self.comment or self.js:
+                self.text += c
+                return True
+        
+        if c == ">":
+            # does it end a comment?
+            if self.comment and self.text.endswith("--"):
+                self.comment = False
+                # TODO: handle comment node
+                self.add_tag("br")
+                self.add_text( "<" + self.text + ">")
+                self.text = ""
+                return True
+            # does it end a script?
+            elif self.js and self.text.endswith("</script"):
+                self.js = False
+                print("THe STUFF:", self.text)
+                script = self.text.split("</script", 1)[0]
+                self.add_tag("b")
+                self.add_tag("pre")
+                self.add_text(script)
+                self.add_tag("/b")
+                self.add_tag("/pre")
+                self.add_tag("br")
+                self.add_text("</script>")
+                self.add_tag("br")
+                self.text = ""
+                # Add the script tag
+
+                return True
+            # Is a script starting?
+            if self.in_tag and self.text.startswith("script"):
+                self.js = True
+                self.add_tag("br")
+                self.add_text("<" + self.text + ">")
+                self.add_tag("br")
+                self.in_tag = False
+                self.text = ""
+                return True
+            
+        if self.comment or self.js:
+            self.text += c
+            return True
+        # Is a comment starting?
+        if self.in_tag and self.text.startswith("!--"):
+            self.comment = True
+            self.text += c
+            return True
+
+        return False
+
+def print_tree(node, indent=0):
+    print(" " * indent, node)
+    for child in node.children:
+        print_tree(child, indent + 2)
+    
 def isGzip(headers):
     if headers.get("content-encoding") == "gzip": return True
     else: return False
 
-def lex(body):
-    buffer = ""
-    out = []
-    in_tag = False
-    if not body: return
-    for c in body:
-        if c == "<":
-            in_tag = True
-            if buffer: out.append(Text(buffer))
-            buffer = ""
-        elif c == ">":
-            in_tag = False
-            out.append(Tag(buffer))
-            buffer = ""
-        else:
-            buffer += c
-    if not in_tag and buffer:
-        out.append(Text(buffer))
-    return out
 
 def loadHeaders(args):
 
@@ -261,7 +526,11 @@ class Browser:
         self.print = 1
 
     def scrollEnd(self, e):
-        self.scroll = self.display_list[-1][1] - HEIGHT + VSTEP
+        font = self.display_list[-1][3]
+        m = font.metrics()
+        bonus = m["linespace"]  
+        # self.scroll = (self.display_list[-1][1] - HEIGHT + VSTEP) * 1.1
+        self.scroll = self.display_list[-1][1] - HEIGHT + VSTEP + bonus
         self.canvas.delete("all")
         self.draw()
 
@@ -280,14 +549,14 @@ class Browser:
         elif action == "moveto":
             # print("hi")
             fraction = float(args[0])  # 0.0 to 1.0 position
-            print("fraction: ", fraction)
+            # print("fraction: ", fraction)
             if(fraction < 0):
-                print(fraction,"Too high")
+                # print(fraction,"Too high")
                 return
             if fraction > (1 + (VSTEP/self.display_list[-1][1])*2):
                 maxScroll = self.display_list[-1][1] - HEIGHT
                 self.scroll = min(int(fraction * maxScroll), 1 + (VSTEP/self.display_list[-1][1])*5)
-                print(fraction, "too low")
+                # print(fraction, "too low")
                 return
             maxScroll = self.display_list[-1][1] - HEIGHT
             self.scroll = int(fraction * maxScroll)
@@ -295,40 +564,37 @@ class Browser:
             self.draw()
 
     def resize(self, e):
-        # if(resizeCount >= 1): return
-        print("Resize fired")
         global WIDTH, HEIGHT
+        # if(resizeCount >= 1): return
+        # print("Resize fired")
         WIDTH = e.width
         HEIGHT = e.height
-        if not hasattr(self, 'text'): return 
-        self.display_list = Layout(self.tokens).display_list
+        # print(f"New width and height: {WIDTH} & {HEIGHT}")
+        if not hasattr(self, 'nodes'): return
+        self.display_list = Layout(self.nodes).display_list
         self.canvas.delete("all")
         self.draw()
 
-    def load(self, url, headers, browser):
+    def load(self, url, headers, browser):        
         body = url.request(headers, 0, browser)
-        print("Recieved response body. sart lexing...")
-        tokens = lex(body)
-        self.tokens = tokens
-        print("Lexing over. Layout")
-        # if(rtl): self.display_list = altLayout(self.text)
-        self.display_list = Layout(tokens).display_list
-        print("Layout set")
+        self.nodes = HTMLParser(body).parse()
+        # print_tree(self.nodes)
+        self.display_list = Layout(self.nodes).display_list
         self.draw()
 
-    def srcLoad(self, url, headers):
-        tokens = url.request(headers, 0)
-        self.tokens = tokens
-        self.display_list = Layout(tokens).display_list
+    def srcLoad(self, url, headers, browser):
+        body = url.request(headers, 0, browser)
+        self.nodes = SrcParser(body).parse()
+        self.display_list = Layout(self.nodes).display_list
         self.draw()
 
     def dataLoad(self, text):
-        self.text = text
-        self.display_list = Layout(text).display_list
+        self.tokens = lex(text)
+        self.display_list = Layout(self.tokens).display_list
         self.draw()
 
     def draw(self):
-        print("Drawing to the screen...")
+        # print("Drawing to the screen...")
         self.emojis = []
         pgLen = 1
         num = 5
@@ -340,14 +606,8 @@ class Browser:
         if num + thumbLen >= 1 and num == 0:
             self.scrollbar.pack_forget()
         if len(self.display_list) == 0: return
-        # for i in range(0, 5):
-        #     if self.print == 1:print(self.display_list[i])
-        #     self.print = 0
         
         for x, y, c, font in self.display_list:
-            # if num > 0:
-            # print(f"x: {x} y: {y} c: {c}")
-                # num -= 1
             if y > self.scroll + HEIGHT: continue
             if y + VSTEP < self.scroll: continue
             if emoji.is_emoji(c):
@@ -367,7 +627,7 @@ class Browser:
     def scrolldown(self, e):
         maxScroll = self.display_list[-1][1] - HEIGHT + VSTEP
         if self.scroll < maxScroll:
-            self.scroll = min(self.scroll + SCROLL_STEP, maxScroll)
+            self.scroll = min(self.scroll + SCROLL_STEP, maxScroll * 1.1)
         self.canvas.delete("all")
         self.draw()
 
@@ -381,6 +641,7 @@ class Browser:
 
 weight = "normal"
 style = "roman"
+
 class Layout:
     def __init__(self, tokens):
         self.display_list = []
@@ -392,46 +653,203 @@ class Layout:
         self.line = []
         self.line_width = 0
         self.last_space = 0
+        self.sup = False
+        self.store = {}
+        self.abbrCnt = 0
+        self.abbr = False
+        self.pre = False
 
-        if tokens:
-            for token in tokens:
-                self.tokenize(token)
+        if not tokens:
+            print("No response")
+        else:
+            self.recurse(tokens)
         self.flush()
 
-    def tokenize(self, token):
-        if isinstance(token, Text):
-            for word in token.text.split():
-                self.processWord(word)
-        elif token.tag == "i":
+    def recurse(self, tree):
+        if isinstance(tree, Text):
+            if not self.pre:
+                for word in tree.text.split():
+                    self.processWord(word)
+            else:
+                for word in tree.text:
+                    self.processWord(word)
+        else:
+            self.open_tag(tree)
+            for child in tree.children:
+                self.recurse(child)
+            self.close_tag(tree)
+
+    def open_tag(self, token):
+        if token.tag == "i":
             self.style = "italic"
-        elif token.tag == "/i":
-            self.style = "roman"
         elif token.tag == "b":
             self.weight = "bold"
-        elif token.tag == "/b":
-            self.weight = "normal"
         elif token.tag == "small":
             self.size -= 2
-        elif token.tag == "/small":
-            self.size += 2
         elif token.tag == "big":
             self.size += 4
-        elif token.tag == "/big":
-            self.size -= 4
-        elif token.tag == "/p":
+        elif token.tag == 'h1' and token.attributes.get("class") == "title":
+            self.size += 6
+            self.weight = "bold"
+            self.flush()
+            self.title = True
+        elif "h1" in token.tag:
+            self.size += 6
+            self.weight = "bold"
+        elif token.tag == "sup":
+            self.size = int(self.size / 2)
+            self.sup = True
+        elif token.tag == "abbr":
+            self.abbr = True
+        elif token.tag == "pre":
+            self.pre = True
+        elif token.tag == "p":
             self.flush()
             self.cursor_y += VSTEP
+        elif token.tag == "br":
+            self.flush()
 
+
+
+    def close_tag(self, token):
+        if token.tag == "i":
+            self.style = "roman"
+        elif token.tag == "b":
+            self.weight = "normal"
+        elif token.tag == "small":
+            self.size += 2
+        elif token.tag == "big":
+            self.size -= 4
+        elif token.tag == 'h1':
+            # print("Closing h1...")
+            self.size -= 6
+            self.weight = "normal"
+            if self.title:
+                n = len(self.line)
+                lineWidth = self.line_width
+                start = (WIDTH - lineWidth) / 2
+                self.flush()
+                for i in range (-1, (-1 * n) - 1, -1):
+                    x, a, b, c = self.display_list[i]
+                    self.display_list[i] = (x+start, a, b, c)
+                self.title = False
+            else:
+                self.flush()
+        elif token.tag == "sup":
+            self.size = self.size * 2
+            self.sup = False
+        elif token.tag == "p":
+            self.flush()
+            self.cursor_y += VSTEP
+        elif token.tag == "abbr":
+            self.abbr = False
+            num = self.abbrCnt - 1
+            self.abbrCnt = 0
+            for i in range (-1, (-1 * num) - 1, -1):
+                x, a, b, c = self.display_list[i]
+                self.display_list[i] = (x-self.last_space, a, b, c)
+        elif token.tag == "pre":
+                self.pre = False
+    
     def processWord(self, word):
         myFont = self.getFont(self.size, self.weight, self.style)
         w = myFont.measure(word)
         space = myFont.measure(" ")
-        if self.line and self.line_width + w > WIDTH - 2 * HSTEP:
+        if self.sup:
+            self.store[word] = "sup"
+
+        if self.line and self.line_width + w > WIDTH - HSTEP:
+            soft = "\N{soft hyphen}"
+
+            if soft in word:
+                rem = WIDTH - HSTEP - self.line_width
+                parts = word.split(soft)
+
+                
+                prefix = parts[0]
+                idx = 1
+
+                # Build the longest prefix that still fits with a visible hyphen
+                while idx < len(parts):
+                    trial = prefix + parts[idx]
+                    if myFont.measure(trial + "-") <= rem:
+                        prefix = trial
+                        idx += 1
+                    else:
+                        break
+
+                # If at least the prefix + hyphen fits, emit that part
+                if myFont.measure(prefix + "-") <= rem:
+                    hyphenated = prefix + "-"
+                    self.line.append((hyphenated, myFont, myFont.measure(hyphenated)))
+                    self.flush()
+
+                    remainder = soft.join(parts[idx:])
+                    if remainder:
+                        self.processWord(remainder)
+                    return
+                
             self.flush()
+
+        soft = "\N{soft hyphen}"
+        if soft in word:
+            parts = word.split(soft)
+            word = "".join(parts)
+            w = myFont.measure(word)
+
+        if self.abbr:
+            self.abbrProcess(word)
+            return
+
         self.line.append((word, myFont, w))
         self.line_width += w + space
         self.last_space = space
 
+            
+    def abbrProcess(self, word):
+        temp = ""
+        upper = word[0].isupper()
+        lower = word[0].islower()
+
+        upperFont = self.getFont(self.size, self.weight, self.style)
+        lowerFont = self.getFont(self.size - 4, "bold", self.style)  
+        for letter in word:
+            if letter.isupper() and upper:
+                temp += letter
+            if letter.islower() and lower:
+                temp += letter
+            elif letter.islower(): #lower but prev is upper
+                upper = False
+                lower = True
+                text = temp.upper()
+                w = lowerFont.measure(text)
+                self.line.append((text, lowerFont,w))
+                self.line_width += w
+                temp = ""
+                self.abbrCnt += 1
+            elif letter.isupper(): #lower but prev is upper
+                upper = True
+                lower = False
+                w = upperFont.measure(temp)
+                self.line.append((temp, upperFont,w))
+                self.line_width += w
+                temp = ""
+                self.abbrCnt += 1
+
+        if temp:
+            if upper:
+                w = upperFont.measure(temp)
+                self.line.append((temp, upperFont, w))
+            else:
+                text = temp.upper()
+                w = lowerFont.measure(text)
+                self.line.append((text, lowerFont, w))
+            self.line_width += w
+            self.abbrCnt += 1
+
+
+
+        
     def flush(self):
         if not self.line:
             return
@@ -442,8 +860,7 @@ class Layout:
         baseline = self.cursor_y + 1.25 * max_ascent
 
         if rtl:
-            total_width = sum(w for _, _, w in self.line) + self.last_space * (len(self.line) - 1)
-            x = WIDTH - HSTEP - total_width
+            x = WIDTH - HSTEP - self.line_width
             for word, font, w in self.line:
                 y = baseline - font.metrics("ascent")
                 self.display_list.append((x, y, word, font))
@@ -453,12 +870,26 @@ class Layout:
             for word, font, w in self.line:
                 y = baseline - font.metrics("ascent")
                 self.display_list.append((x, y, word, font))
+                # print(f"{word} added to display_list")
                 x += w + font.measure(" ")
+                if self.store.get(word):
+                    x = self.fix(word, font, w, x, y, self.store.get(word))
 
         self.cursor_y = baseline + 1.25 * max_descent
         self.cursor_x = WIDTH - HSTEP if rtl else HSTEP
         self.line = []
         self.line_width = 0
+
+    def fix(self, word, font, width, x, y, operation):
+        if(operation == "sup"):
+            prevWord = self.display_list[-2] #last word is current word, prev word is behind that
+            baseline = y + font.metrics("ascent")
+            y = baseline - prevWord[3].metrics("ascent") 
+            a, b, c, d = self.display_list[-1]
+            self.display_list.pop(-1)
+            self.display_list.append((a,y, c, d))
+            del self.store[word]
+            return x
 
     def getFont(self,size, weight, style):
         key = (size, weight, style)
@@ -469,9 +900,30 @@ class Layout:
             FONTS[key] = (font, label)
         return FONTS[key][0]
 
+def altLayout(text):
+    display_list = []
+    cursor_x, cursor_y = WIDTH - HSTEP, VSTEP
+    print("hello from alt")
+    if not text: return display_list
+    for c in reversed(text):
+        display_list.append((cursor_x, cursor_y, c))
+        cursor_x -= HSTEP
+        if cursor_x <= HSTEP:
+            cursor_y += VSTEP
+            cursor_x = WIDTH - HSTEP
+    return display_list
+
+
+
+
 if __name__ == "__main__":
     import sys
     import os
+    # browser = Browser()
+    # body = URL(sys.argv[1]).request({}, 1, browser)
+    # nodes = HTMLParser(body).parse()
+    # print_tree(nodes)
+
     if "-rtl" in sys.argv: rtl = True
     if len(sys.argv) < 2:
         Browser().dataLoad("Welcome to homepage")
@@ -492,7 +944,8 @@ if __name__ == "__main__":
             scheme, viewUrl = link.split(":", 1)
             url = URL(viewUrl)
             headers = loadHeaders(sys.argv)
-            Browser().srcLoad(url, headers)
+            browser = Browser()
+            browser.srcLoad(url, headers,browser)
         else:
             path = ""
             scheme = ""

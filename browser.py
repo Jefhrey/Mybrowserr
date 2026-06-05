@@ -201,59 +201,75 @@ class HTMLParser:
         "link", "meta", "title", "style", "script",]
         self.SIBILINGS = ["p", "li"]
         self.js = False
-        self.quoteAttr = {}
+        self.in_tag = False
+        self.comment = False
     def parse(self):
-        text = ""
-        in_tag = False
-        # in_quotes = False
-        comment = False
+        self.text = ""
         for c in self.body:
-            if comment:
-                text += c
-                if text.endswith("-->"):
-                    comment = False
-                    in_tag = False
-                    text = ""
+            if self.is_ignore(c):
                 continue
-            if in_tag and text.startswith("!--"):
-                comment = True
             elif c == "<":
-                if self.js: 
-                    text += c
-                    continue
-                if not comment:
-                    in_tag = True
-                    if text: self.add_text(text)
-                    text = ""
+                self.in_tag = True
+                if self.text: self.add_text(self.text)
+                self.text = ""
             elif c == ">":
-                if comment:
-                    if text.endswith("--"):
-                        comment = False
-                        in_tag = False
-                        text = ""
-                        continue
-                    else:continue
-
-                elif text.endswith("</script"):
-                    self.js = False
-                    text = text[:-7]   #stripping last 7 characters i.e </script
-                                        # Future room for adding js when neeeded        
-                    text = "</script"
-                elif text.startswith("script") and not self.js and in_tag:
-                    self.js = True
-                elif self.js:
-                    text += c
-                    continue
-                
-                in_tag = False
-                self.add_tag(text)
-                text = ""
+                self.in_tag = False
+                self.add_tag(self.text)
+                self.text = ""
             else:
-                text += c
-        if not in_tag and text:
-            self.add_text(text)
-        return self.finish()   # root node
+                self.text += c
+        if not self.in_tag and self.text:
+            self.add_text(self.text)
+        return self.finish()
+                
+
     
+    def is_ignore(self, c):
+        if c == "<":
+            # is already comment or script
+            if self.comment or self.js:
+                self.text += c
+                return True
+        
+        if c == ">":
+            # does it end a comment?
+            if self.comment and self.text.endswith("--"):
+                self.comment = False
+                # TODO: handle comment node
+                self.text = ""
+                return True
+            # does it end a script?
+            elif self.js and self.text.endswith("</script"):
+                self.js = False
+                script = self.text[:-7]
+                # Add the script tag
+                tag = script.split(">", 1)[0]
+                self.add_tag(tag)
+                self.text = ""
+                return True
+            # Is a script starting?
+            if self.in_tag and self.text.startswith("script"):
+                self.js = True
+                self.add_tag(self.text)
+                self.in_tag = False
+                self.text = ""
+                return True
+            
+        if self.comment or self.js:
+            self.text += c
+            return True
+        # Is a comment starting?
+        if self.in_tag and self.text.startswith("!--"):
+            self.comment = True
+            self.text += c
+            return True
+        
+
+        return False
+                
+        
+
+
     def add_text(self, text):
         if text.isspace(): return
         self.implicit_tags(None)   # adds any missing implicts tags
@@ -316,7 +332,7 @@ class HTMLParser:
         n = len(tag)
         temp = temp[n:]
         temp = temp.strip()
-        print(temp)
+        # print(temp) 
         keys = [] #last word in every entry of parts is an attribute
         values = []
         attributes = {}
@@ -359,6 +375,86 @@ class HTMLParser:
 
         print(f"The tag: {tag}\nThe Attributes: {attributes}")
         return tag, attributes             
+class SrcParser(HTMLParser):
+    def parse(self):
+        self.text = ""
+        for c in self.body:
+            if self.is_ignore(c):
+                continue
+            elif c == "<":
+                self.in_tag = True
+                if self.text:
+                    self.add_tag("pre") 
+                    self.add_tag("b")
+                    self.add_text(self.text)
+                    self.add_tag("/b")
+                    self.add_tag("/pre") 
+                self.text = ""
+            elif c == ">":
+                self.in_tag = False
+                self.add_tag("br")
+                self.add_text("<" + self.text + ">")
+                self.add_tag("br")
+                self.text = ""
+            else:
+                self.text += c
+        if not self.in_tag and self.text:
+            self.add_text(self.text)
+        return self.finish()
+    
+    def is_ignore(self, c):
+        if c == "<":
+            # is already comment or script
+            if self.comment or self.js:
+                self.text += c
+                return True
+        
+        if c == ">":
+            # does it end a comment?
+            if self.comment and self.text.endswith("--"):
+                self.comment = False
+                # TODO: handle comment node
+                self.add_tag("br")
+                self.add_text( "<" + self.text + ">")
+                self.text = ""
+                return True
+            # does it end a script?
+            elif self.js and self.text.endswith("</script"):
+                self.js = False
+                print("THe STUFF:", self.text)
+                script = self.text.split("</script", 1)[0]
+                self.add_tag("b")
+                self.add_tag("pre")
+                self.add_text(script)
+                self.add_tag("/b")
+                self.add_tag("/pre")
+                self.add_tag("br")
+                self.add_text("</script>")
+                self.add_tag("br")
+                self.text = ""
+                # Add the script tag
+
+                return True
+            # Is a script starting?
+            if self.in_tag and self.text.startswith("script"):
+                self.js = True
+                self.add_tag("br")
+                self.add_text("<" + self.text + ">")
+                self.add_tag("br")
+                self.in_tag = False
+                self.text = ""
+                return True
+            
+        if self.comment or self.js:
+            self.text += c
+            return True
+        # Is a comment starting?
+        if self.in_tag and self.text.startswith("!--"):
+            self.comment = True
+            self.text += c
+            return True
+
+        return False
 
 def print_tree(node, indent=0):
     print(" " * indent, node)
@@ -489,7 +585,7 @@ class Browser:
     def srcLoad(self, url, headers, browser):
         body = url.request(headers, 0, browser)
         self.nodes = SrcParser(body).parse()
-        self.display_list = Layout(self.tokens).display_list
+        self.display_list = Layout(self.nodes).display_list
         self.draw()
 
     def dataLoad(self, text):
@@ -610,6 +706,9 @@ class Layout:
         elif token.tag == "p":
             self.flush()
             self.cursor_y += VSTEP
+        elif token.tag == "br":
+            self.flush()
+
 
 
     def close_tag(self, token):
@@ -820,10 +919,10 @@ def altLayout(text):
 if __name__ == "__main__":
     import sys
     import os
-    browser = Browser()
-    body = URL(sys.argv[1]).request({}, 1, browser)
-    nodes = HTMLParser(body).parse()
-    print_tree(nodes)
+    # browser = Browser()
+    # body = URL(sys.argv[1]).request({}, 1, browser)
+    # nodes = HTMLParser(body).parse()
+    # print_tree(nodes)
 
     if "-rtl" in sys.argv: rtl = True
     if len(sys.argv) < 2:
@@ -845,7 +944,8 @@ if __name__ == "__main__":
             scheme, viewUrl = link.split(":", 1)
             url = URL(viewUrl)
             headers = loadHeaders(sys.argv)
-            Browser().srcLoad(url, headers)
+            browser = Browser()
+            browser.srcLoad(url, headers,browser)
         else:
             path = ""
             scheme = ""
