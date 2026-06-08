@@ -10,7 +10,7 @@ class Server:
                         proto = socket.IPPROTO_TCP)
         self.server.bind(("localhost", 9000))
         self.server.listen()
-        self.clients = []
+        self.clients = {}
 
         while True:
             client, address = self.server.accept()
@@ -26,25 +26,32 @@ class Server:
             User-Agent: Jef
             Accept-Encoding: gzip
         """
+        
         request = client.makefile('rb', newline = "\r\n")
-
-        statusLine = request.readline().decode("utf8")
-        method, target, protocol = statusLine.split()
-        headers = {}
         while True:
-            line = request.readline().decode("utf8")
-            if line == "\r\n": break
-            header, value = line.split(":", 1)
-            headers[header.casefold()] = value.strip()
+            statusLine = request.readline().decode("utf8")
+            if not statusLine:
+                break
 
-        if method == "GET": self.get(client, target, headers)
+            method, target, protocol = statusLine.split()
+            headers = {}
+            while True:
+                line = request.readline().decode("utf8")
+                if line == "\r\n": break
+                header, value = line.split(":", 1)
+                headers[header.casefold()] = value.strip()
+
+            if method == "GET": self.get(client,target, headers)
+            if headers.get("connection") == "close":
+                break
         return
 
-    def get(self, client, target, headers):
+    def get(self, client,target, headers):
 
         # prepare response
         _, path = target.split("/", 1) 
         path += ".html"
+        path = "pages/" + path
         body = ""
         with open(path, "rb") as f:
             body = f.read()
@@ -52,8 +59,10 @@ class Server:
         response = f"HTTP/1.1 200 OK\r\n"
         response += f"Content-Length: {len(body)}\r\n"
         response += "Content-Type: text/html; charset=utf-8\r\n"
+        response += "Cache-Control: max-age=120\r\n"
         response += "\r\n"
         client.send(response.encode("utf8") + body)
+        print("sending response...")
         return
 
 
