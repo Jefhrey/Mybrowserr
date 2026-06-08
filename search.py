@@ -115,11 +115,11 @@ class URL:
             path = response_headers["location"]
             if path.startswith("http://") or path.startswith("https://"):
                 nextHop = response_headers["location"]
-                return URL(nextHop).request({}, attempt + 1)  # pass attempt count down
+                return URL(nextHop).request({}, attempt + 1, browser)  # pass attempt count down
             else:
                 # relative path.
                 self.path = path
-                return self.request({}, attempt + 1)
+                return self.request({}, attempt + 1, browser)
 
         #Encoding Handling
         raw = b""
@@ -203,9 +203,12 @@ class HTMLParser:
         self.js = False
         self.in_tag = False
         self.comment = False
+        self.TEXT_FORMAT = ["b", "i", "/b", "/i"]
+        self.txt_track = []
     def parse(self):
         self.text = ""
         for c in self.body:
+            # print(self.text)
             if self.is_ignore(c):
                 continue
             elif c == "<":
@@ -214,6 +217,8 @@ class HTMLParser:
                 self.text = ""
             elif c == ">":
                 self.in_tag = False
+                if self.handle_txt_format():
+                    continue
                 self.add_tag(self.text)
                 self.text = ""
             else:
@@ -223,7 +228,27 @@ class HTMLParser:
         return self.finish()
                 
 
-    
+    def handle_txt_format(self):
+        # Check if txt tag
+        if self.text not in self.TEXT_FORMAT:
+            return False
+        if not self.text.startswith("/"):
+            self.txt_track.append(self.text)
+            return False
+        if not self.txt_track:
+            return False
+        # We have a closing tag, with a non empty track
+        dad = self.txt_track[-1]
+        if ("/" + dad) == self.text:
+            return False
+        else:
+            # Close the dad tag, open the curr tag and then reopen the dad tag
+            self.add_tag("/" + dad)
+            self.add_tag(self.text)
+            self.add_tag(dad)
+            self.text = ""
+            return True
+        
     def is_ignore(self, c):
         if c == "<":
             # is already comment or script
@@ -263,13 +288,8 @@ class HTMLParser:
             self.comment = True
             self.text += c
             return True
-        
-
         return False
                 
-        
-
-
     def add_text(self, text):
         if text.isspace(): return
         self.implicit_tags(None)   # adds any missing implicts tags
@@ -329,52 +349,61 @@ class HTMLParser:
     def get_attributes(self, text):
         temp = text
         tag = temp.split()[0]
-        n = len(tag)
-        temp = temp[n:]
-        temp = temp.strip()
-        # print(temp) 
-        keys = [] #last word in every entry of parts is an attribute
-        values = []
+        temp = temp[len(tag):].strip()
+
         attributes = {}
-        in_quotes = False
-        is_key = True
-        text = ""
-        for c in temp:
-            if is_key and c == " " and len(text) == 0:
-                continue
-            if c == "=" and not in_quotes:
-                is_key = False
-                keys.append(text.strip())
-                text = ""
-                continue
-            if c in ['"', "'"]:
-                # is_key = not is_key
-                in_quotes = not in_quotes
-                if not in_quotes:
-                    values.append(text)
-                    text = ""
-                    is_key = True
-                continue
-            if not in_quotes and not is_key:
-                if c == " ":
-                    if len(text) > 0:
-                        values.append(text)
-                        text = ""
-                        is_key = True
-                        continue
-                    if len(text) == 0:
-                        continue
-                else:
-                    text += c
+        i = 0
+        n = len(temp)
 
+        while i < n:
+            while i < n and temp[i].isspace():
+                i += 1
+            if i >= n:
+                break
+
+            # read attribute name
+            start = i
+            while i < n and temp[i] not in ["=", " "]:
+                i += 1
+            key = temp[start:i].strip()
+
+            while i < n and temp[i].isspace():
+                i += 1
+
+            # boolean attribute: no value
+            if i >= n or temp[i] != "=":
+                if key:
+                    attributes[key] = ""
+                continue
+
+            i += 1  # skip '='
+            while i < n and temp[i].isspace():
+                i += 1
+
+            if i >= n:
+                attributes[key] = ""
+                break
+
+            # quoted value
+            if temp[i] in ['"', "'"]:
+                quote = temp[i]
+                i += 1
+                start = i
+                while i < n and temp[i] != quote:
+                    i += 1
+                value = temp[start:i]
+                i += 1  # skip closing quote
             else:
-                text += c
+                # unquoted value
+                start = i
+                while i < n and not temp[i].isspace():
+                    i += 1
+                value = temp[start:i]
 
-        for i in range(0, len(keys)):
-            attributes[keys[i]] = values[i]
+            attributes[key] = value
 
-        print(f"The tag: {tag}\nThe Attributes: {attributes}")
-        return tag, attributes             
+        return tag, attributes
+          
 class SrcParser(HTMLParser):
     def parse(self):
         self.text = ""
@@ -421,7 +450,6 @@ class SrcParser(HTMLParser):
             # does it end a script?
             elif self.js and self.text.endswith("</script"):
                 self.js = False
-                print("THe STUFF:", self.text)
                 script = self.text.split("</script", 1)[0]
                 self.add_tag("b")
                 self.add_tag("pre")
@@ -503,33 +531,59 @@ WIDTH, HEIGHT = 800, 600
 class Browser:
     def __init__(self):
         self.window = tkinter.Tk()
-        bi_times = tkinter.font.Font(family="Finlandica Headline",size=16)
+        bi_times = tkinter.font.Font(family="Finlandica Headline", size=16)
         self.font = bi_times
+
+        self.topbar = tkinter.Frame(self.window)
+        self.topbar.pack(side="top", fill="x")
+
+        self.url_entry = tkinter.Entry(self.topbar)
+        self.url_entry.pack(side="left", fill="x", expand=1, padx=6, pady=6)
+        self.url_entry.bind("<Return>", self.load_from_entry)
+
+        self.go_button = tkinter.Button(self.topbar, text="Go", command=self.load_from_entry)
+        self.go_button.pack(side="right", padx=6, pady=6)
+
+        self.content = tkinter.Frame(self.window)
+        self.content.pack(side="top", fill="both", expand=1)
+
+        self.scrollbar = tkinter.Scrollbar(self.content, orient="vertical", command=self.scrollMaster, bg="black")
+        self.scrollbar.pack(side="right", fill="y")
+
         self.canvas = tkinter.Canvas(
-            self.window, 
+            self.content,
             width=WIDTH,
             height=HEIGHT,
-            bg = "#f9f3de"
+            bg="#f9f3de"
         )
-        self.scroll = 0
-        self.scrollbar = tkinter.Scrollbar(self.window, orient= "vertical", command = self.scrollMaster, bg = "black")
-        self.scrollbar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=1)
+        self.canvas.bind("<Configure>", self.resize)
+
+        self.scroll = 0
         self.emojis = []
         self.window.bind("<Down>", self.scrolldown)
         self.window.bind("<Up>", self.scrollup)
         self.window.bind("<Button-4>", self.scrollup)
         self.window.bind("<Button-5>", self.scrolldown)
-        self.window.bind("<Configure>", self.resize)    
         self.window.bind("<End>", self.scrollEnd)
         self.window.bind("<Home>", self.scrollTop)
         self.print = 1
 
+    def load_from_entry(self, event=None):
+        url = self.url_entry.get().strip()
+        if not url:
+            return
+        try:
+            self.load(URL(url), {}, self)
+        except Exception as e:
+            self.dataLoad(f"Error: {e}")
+
     def scrollEnd(self, e):
+        if not hasattr(self, 'display_list') or not self.display_list:
+            return
         font = self.display_list[-1][3]
         m = font.metrics()
-        bonus = m["linespace"]  
-        # self.scroll = (self.display_list[-1][1] - HEIGHT + VSTEP) * 1.1
+        bonus = m["linespace"]
         self.scroll = self.display_list[-1][1] - HEIGHT + VSTEP + bonus
         self.canvas.delete("all")
         self.draw()
@@ -540,6 +594,8 @@ class Browser:
         self.draw()
 
     def scrollMaster(self, action, *args):
+        if not hasattr(self, 'display_list') or not self.display_list:
+            return
         if action == "scroll":
             direction = int(args[0])  # 1 = down, -1 = up
             if direction > 0:
@@ -547,16 +603,12 @@ class Browser:
             else:
                 self.scrollup(None)
         elif action == "moveto":
-            # print("hi")
             fraction = float(args[0])  # 0.0 to 1.0 position
-            # print("fraction: ", fraction)
-            if(fraction < 0):
-                # print(fraction,"Too high")
+            if fraction < 0:
                 return
-            if fraction > (1 + (VSTEP/self.display_list[-1][1])*2):
+            if fraction > (1 + (VSTEP / self.display_list[-1][1]) * 2):
                 maxScroll = self.display_list[-1][1] - HEIGHT
-                self.scroll = min(int(fraction * maxScroll), 1 + (VSTEP/self.display_list[-1][1])*5)
-                # print(fraction, "too low")
+                self.scroll = min(int(fraction * maxScroll), 1 + (VSTEP / self.display_list[-1][1]) * 5)
                 return
             maxScroll = self.display_list[-1][1] - HEIGHT
             self.scroll = int(fraction * maxScroll)
@@ -565,20 +617,17 @@ class Browser:
 
     def resize(self, e):
         global WIDTH, HEIGHT
-        # if(resizeCount >= 1): return
-        # print("Resize fired")
         WIDTH = e.width
         HEIGHT = e.height
-        # print(f"New width and height: {WIDTH} & {HEIGHT}")
-        if not hasattr(self, 'nodes'): return
+        if not hasattr(self, 'nodes'):
+            return
         self.display_list = Layout(self.nodes).display_list
         self.canvas.delete("all")
         self.draw()
 
-    def load(self, url, headers, browser):        
+    def load(self, url, headers, browser):
         body = url.request(headers, 0, browser)
         self.nodes = HTMLParser(body).parse()
-        # print_tree(self.nodes)
         self.display_list = Layout(self.nodes).display_list
         self.draw()
 
@@ -594,27 +643,29 @@ class Browser:
         self.draw()
 
     def draw(self):
-        # print("Drawing to the screen...")
         self.emojis = []
         pgLen = 1
         num = 5
-        if len(self.display_list) > 0 : pgLen = self.display_list[-1][1]
-        scrollUnit = (SCROLL_STEP / pgLen) 
-        thumbLen = (HEIGHT/pgLen)
-        num = scrollUnit * (self.scroll/100)
+        if len(self.display_list) > 0:
+            pgLen = self.display_list[-1][1]
+        scrollUnit = (SCROLL_STEP / pgLen)
+        thumbLen = (HEIGHT / pgLen)
+        num = scrollUnit * (self.scroll / 100)
         self.scrollbar.set(num, num + thumbLen)
         if num + thumbLen >= 1 and num == 0:
             self.scrollbar.pack_forget()
-        if len(self.display_list) == 0: return
-        
-        for x, y, c, font in self.display_list:
-            if y > self.scroll + HEIGHT: continue
-            if y + VSTEP < self.scroll: continue
-            if emoji.is_emoji(c):
-                self.drawEmoji(c, x , y)
-                continue
-            self.canvas.create_text(x, y - self.scroll, text=c, anchor = "nw", font = font)
+        if len(self.display_list) == 0:
+            return
 
+        for x, y, c, font in self.display_list:
+            if y > self.scroll + HEIGHT:
+                continue
+            if y + VSTEP < self.scroll:
+                continue
+            if emoji.is_emoji(c):
+                self.drawEmoji(c, x, y)
+                continue
+            self.canvas.create_text(x, y - self.scroll, text=c, anchor="nw", font=font)
 
     def drawEmoji(self, emoji, x, y):
         fileName = "./assets/emojis/" + hex(ord(emoji))[2:].upper() + ".png"
@@ -622,9 +673,11 @@ class Browser:
         img = img.resize((16, 16))
         photo = ImageTk.PhotoImage(img)
         self.emojis.append(photo)
-        self.canvas.create_image(x, y - self.scroll, image= photo)
+        self.canvas.create_image(x, y - self.scroll, image=photo)
 
     def scrolldown(self, e):
+        if not hasattr(self, 'display_list') or not self.display_list:
+            return
         maxScroll = self.display_list[-1][1] - HEIGHT + VSTEP
         if self.scroll < maxScroll:
             self.scroll = min(self.scroll + SCROLL_STEP, maxScroll * 1.1)
@@ -633,12 +686,12 @@ class Browser:
 
     def scrollup(self, e):
         self.canvas.delete("all")
-        if self.scroll >= 1: self.scroll -= SCROLL_STEP
+        if self.scroll >= 1:
+            self.scroll -= SCROLL_STEP
         self.draw()
-    
+
     def aboutBlank(self):
         self.dataLoad("")
-
 weight = "normal"
 style = "roman"
 
@@ -658,6 +711,7 @@ class Layout:
         self.abbrCnt = 0
         self.abbr = False
         self.pre = False
+        self.title = False
 
         if not tokens:
             print("No response")
@@ -846,9 +900,6 @@ class Layout:
                 self.line.append((text, lowerFont, w))
             self.line_width += w
             self.abbrCnt += 1
-
-
-
         
     def flush(self):
         if not self.line:
@@ -899,23 +950,7 @@ class Layout:
             label = tkinter.Label(font=font)   # Dummy widget using the font for improved performance, as per official documentation
             FONTS[key] = (font, label)
         return FONTS[key][0]
-    
-# class srcLayout(Layout):
-#     def recurse(self, tree, indent = 0):
-#         if isinstance(tree, Text):
-#             if not self.pre:
-#                 for word in tree.text.split():
-#                     word += " " * indent
-#                     self.processWord(word)
-#             else:
-#                 for word in tree.text:
-#                     word += " " * indent
-#                     self.processWord(word)
-#         else:
-#             self.open_tag(tree)
-#             for child in tree.children:
-#                 self.recurse(child, indent + 2)
-#             self.close_tag(tree)
+
 
 if __name__ == "__main__":
     import sys
@@ -986,3 +1021,6 @@ if __name__ == "__main__":
                 except FileNotFoundError:
                     Browser().dataLoad("File does not exist...")
     tkinter.mainloop()
+    print("hi")
+
+

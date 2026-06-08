@@ -1025,3 +1025,4 @@ if __name__ == "__main__":
                 except FileNotFoundError:
                     Browser().dataLoad("File does not exist...")
     tkinter.mainloop()
+    print("hi")
