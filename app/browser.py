@@ -6,11 +6,12 @@ from PIL import Image, ImageTk
 from layout import Layout
 from parser import HTMLParser, SrcParser
 from url import URL
-from globals import VSTEP, SCROLL_STEP, WIDTH, HEIGHT
+import globals as G
+
 class Browser:
     def __init__(self):
         self.window = tkinter.Tk()
-        self.window.geometry(f"{WIDTH}x{HEIGHT}")
+        self.window.geometry(f"{G.WIDTH}x{G.HEIGHT}")
         bi_times = tkinter.font.Font(family="Finlandica Headline",size=16)
         self.font = bi_times
 
@@ -23,7 +24,7 @@ class Browser:
 
         self.canvas = tkinter.Canvas(
             self.bottom_frame, 
-            width=WIDTH,
+            width =G.WIDTH,
             bg = "#f9f3de"
         )
 
@@ -57,8 +58,8 @@ class Browser:
         font = self.display_list[-1][3]
         m = font.metrics()
         bonus = m["linespace"]  
-        # self.scroll = (self.display_list[-1][1] - HEIGHT + VSTEP) * 1.1
-        self.scroll = self.display_list[-1][1] - HEIGHT + VSTEP + bonus
+        # self.scroll = (self.display_list[-1][1] - G.HEIGHT + G.VSTEP) * 1.1
+        self.scroll = self.display_list[-1][1] - G.HEIGHT + G.VSTEP + bonus
         self.canvas.delete("all")
         self.draw()
 
@@ -81,22 +82,21 @@ class Browser:
             if(fraction < 0):
                 # print(fraction,"Too high")
                 return
-            if fraction > (1 + (VSTEP/self.display_list[-1][1])*2):
-                maxScroll = self.display_list[-1][1] - HEIGHT
-                self.scroll = min(int(fraction * maxScroll), 1 + (VSTEP/self.display_list[-1][1])*5)
+            if fraction > (1 + (G.VSTEP/self.display_list[-1][1])*2):
+                maxScroll = self.display_list[-1][1] - G.HEIGHT
+                self.scroll = min(int(fraction * maxScroll), 1 + (G.VSTEP/self.display_list[-1][1])*5)
                 # print(fraction, "too low")
                 return
-            maxScroll = self.display_list[-1][1] - HEIGHT
+            maxScroll = self.display_list[-1][1] - G.HEIGHT
             self.scroll = int(fraction * maxScroll)
             self.canvas.delete("all")
             self.draw()
 
     def resize(self, e):
-        global WIDTH, HEIGHT
         # if(resizeCount >= 1): return
         # print("Resize fired")
-        WIDTH = e.width 
-        HEIGHT = e.height
+        G.WIDTH = e.width
+        G.HEIGHT = e.height
         if not hasattr(self, 'nodes'): return
         self.display_list = Layout(self.nodes).display_list
         self.canvas.delete("all")
@@ -137,8 +137,8 @@ class Browser:
         pgLen = 1
         num = 5
         if len(self.display_list) > 0 : pgLen = self.display_list[-1][1]
-        scrollUnit = (SCROLL_STEP / pgLen) 
-        thumbLen = (HEIGHT/pgLen)
+        scrollUnit = (G.SCROLL_STEP / pgLen) 
+        thumbLen = (G.HEIGHT/pgLen)
         num = scrollUnit * (self.scroll/100)
         self.scrollbar.set(num, num + thumbLen)
         if num + thumbLen >= 1 and num == 0:
@@ -146,8 +146,8 @@ class Browser:
         if len(self.display_list) == 0: return
         
         for x, y, c, font in self.display_list:
-            if y > self.scroll + HEIGHT: continue
-            if y + VSTEP < self.scroll: continue
+            if y > self.scroll + G.HEIGHT: continue
+            if y + G.VSTEP < self.scroll: continue
             if emoji.is_emoji(c):
                 self.drawEmoji(c, x , y)
                 continue
@@ -163,15 +163,15 @@ class Browser:
         self.canvas.create_image(x, y - self.scroll, image= photo)
 
     def scrolldown(self, e):
-        maxScroll = self.display_list[-1][1] - HEIGHT + VSTEP
+        maxScroll = self.display_list[-1][1] - G.HEIGHT + G.VSTEP
         if self.scroll < maxScroll:
-            self.scroll = min(self.scroll + SCROLL_STEP, maxScroll * 1.1)
+            self.scroll = min(self.scroll + G.SCROLL_STEP, maxScroll * 1.1)
         self.canvas.delete("all")
         self.draw()
 
     def scrollup(self, e):
         self.canvas.delete("all")
-        if self.scroll >= 1: self.scroll -= SCROLL_STEP
+        if self.scroll >= 1: self.scroll -= G.SCROLL_STEP
         self.draw()
     
     def aboutBlank(self):

@@ -1,12 +1,12 @@
 import tkinter
-from globals import rtl, VSTEP, HSTEP, WIDTH
+import globals as G
 from parser import Text, Element
 
 class Layout:
     def __init__(self, tokens):
         self.display_list = []
-        self.cursor_x = HSTEP
-        self.cursor_y = VSTEP
+        self.cursor_x = G.HSTEP
+        self.cursor_y = G.VSTEP
         self.weight = "normal"
         self.style = "roman"
         self.size = 16
@@ -66,7 +66,7 @@ class Layout:
             self.pre = True
         elif token.tag == "p":
             self.flush()
-            self.cursor_y += VSTEP
+            self.cursor_y += G.VSTEP
         elif token.tag == "br":
             self.flush()
 
@@ -88,7 +88,7 @@ class Layout:
             if self.title:
                 n = len(self.line)
                 lineWidth = self.line_width
-                start = (WIDTH - lineWidth) / 2
+                start = (G.WIDTH - lineWidth) / 2
                 self.flush()
                 for i in range (-1, (-1 * n) - 1, -1):
                     x, a, b, c = self.display_list[i]
@@ -101,7 +101,7 @@ class Layout:
             self.sup = False
         elif token.tag == "p":
             self.flush()
-            self.cursor_y += VSTEP
+            self.cursor_y += G.VSTEP
         elif token.tag == "abbr":
             self.abbr = False
             num = self.abbrCnt - 1
@@ -119,11 +119,11 @@ class Layout:
         if self.sup:
             self.store[word] = "sup"
 
-        if self.line and self.line_width + w > WIDTH - HSTEP:
+        if self.line and self.line_width + w > G.WIDTH - G.HSTEP:
             soft = "\N{soft hyphen}"
 
             if soft in word:
-                rem = WIDTH - HSTEP - self.line_width
+                rem = G.WIDTH - G.HSTEP - self.line_width
                 parts = word.split(soft)
 
                 
@@ -217,14 +217,14 @@ class Layout:
         max_descent = max(m["descent"] for m in metrics)
         baseline = self.cursor_y + 1.25 * max_ascent
 
-        if rtl:
-            x = WIDTH - HSTEP - self.line_width
+        if G.rtl:
+            x = G.WIDTH - G.HSTEP - self.line_width
             for word, font, w in self.line:
                 y = baseline - font.metrics("ascent")
                 self.display_list.append((x, y, word, font))
                 x += w + self.last_space
         else:
-            x = HSTEP
+            x = G.HSTEP
             for word, font, w in self.line:
                 y = baseline - font.metrics("ascent")
                 self.display_list.append((x, y, word, font))
@@ -234,7 +234,7 @@ class Layout:
                     x = self.fix(word, font, w, x, y, self.store.get(word))
 
         self.cursor_y = baseline + 1.25 * max_descent
-        self.cursor_x = WIDTH - HSTEP if rtl else HSTEP
+        self.cursor_x = G.WIDTH - G.HSTEP if G.rtl else G.HSTEP
         self.line = []
         self.line_width = 0
 

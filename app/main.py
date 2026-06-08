@@ -1,5 +1,5 @@
 from browser import Browser
-from globals import rtl
+import globals as G
 from url import URL
 import tkinter
 import sys
@@ -9,7 +9,7 @@ def main():
     # body = URL(sys.argv[1]).request({}, 1, browser)
     # nodes = HTMLParser(body).parse()
     # print_tree(nodes)
-    if "-rtl" in sys.argv: rtl = True
+    if "-rtl" in sys.argv: G.rtl = True
     if len(sys.argv) < 2:
         Browser().dataLoad("Welcome to homepage")
     else:
